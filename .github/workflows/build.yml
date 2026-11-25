@@ -39,5 +39,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete v1.0.0 --yes --cleanup-tag || true
-          gh release create v1.0.0 dist/*.exe --title "Pharmacy System 1.0.0" --notes "نظام الصيدلية: ملف تثبيت ويندوز. الدخول الافتراضي: المدير / 1234"
+          V=$(node -p "require('./package.json').version")
+          gh release delete "v$V" --yes --cleanup-tag || true
+          gh release create "v$V" dist/*.exe --title "Pharmacy System $V" --notes "نظام الصيدلية: ملف تثبيت ويندوز. الدخول الافتراضي: المدير / 1234"
