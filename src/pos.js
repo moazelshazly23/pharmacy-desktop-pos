@@ -12,6 +12,9 @@ const cartTotal = () => r2(cartSub() - cartDisc());
 Views.posLeave = () => {};
 Views.pos = async (el) => {
   try { App.held = JSON.parse(localStorage.getItem('held') || '[]'); if (!Array.isArray(App.held)) App.held = []; } catch (e) { App.held = []; }
+  const before = App.held.length;
+  App.held = App.held.filter((h) => h && h.t && fdate(h.t) >= addDays(today(), -7)); // parked invoices older than a week are stale: drop them quietly
+  if (App.held.length !== before) localStorage.setItem('held', JSON.stringify(App.held));
   el.style.padding = '14px 18px';
   el.innerHTML = `<div class="pos"><div class="pos-left">
     <div class="searchbar"><span class="si">🔍</span><input id="q" placeholder="امسح الباركود أو اكتب اسم الدواء / المادة الفعالة... (F2)" autocomplete="off" autofocus><div class="results" id="res" hidden></div></div>
@@ -91,6 +94,8 @@ async function addToCart(d, unit = 'pack') {
   if (!App.shift && !App.warnedShift) { App.warnedShift = true; toast('تنبيه: مفيش وردية مفتوحة. افتح وردية من "الوردية والمصروفات" عشان الجرد اليومي يتحسب', ''); }
   const full = await getDrug(d.id);
   if (!(full.price > 0)) toast('تنبيه: الصنف ده سعره صفر. حدّث السعر من شاشة الأصناف قبل البيع', 'err');
+  const near = await Q1('SELECT MIN(expiry) e FROM batches WHERE drug_id=? AND qty>0 AND expiry IS NOT NULL', [full.id]);
+  if (near?.e && near.e <= addDays(today(), num(App.settings.expiry_days || 90))) toast(`تنبيه: أقرب تشغيلة متاحة من "${full.arabic || full.name}" ${near.e < today() ? 'تاريخها فات' : 'قربت تنتهي (' + fdate(near.e) + ')'}`, '');
   const ex = POS.cart.find((l) => l.id === full.id && l.unit === unit);
   if (ex) ex.n += 1;
   else POS.cart.push({ id: full.id, name: full.arabic || full.name, en: full.name, active: full.active, price: full.price, strips: full.strips || 1, unit, n: 1, disc: 0, stock: full.stock, kind: full.kind });
@@ -272,6 +277,7 @@ async function printReceipt(saleId, opts = {}) {
   $('#receipt').innerHTML = `<h3>${esc(S.pharmacy_name)}</h3><div class="c">${esc(S.address || '')}</div><div class="c">${esc(S.phone || '')}</div><hr>
    <div>فاتورة رقم: <b>${s.id}</b></div><div>التاريخ: ${ftime(s.date)}</div><div>الكاشير: ${esc(s.uname || '')}</div>${s.cname ? `<div>العميل: ${esc(s.cname)}</div>` : ''}<hr>
    <table style="width:100%"><thead><tr><th>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr></thead><tbody>${Object.values(merged).map((i) => `<tr><td>${esc(i.arabic || i.name)}</td><td>${qtyf(i.unit === 'strip' ? i.qty * (i.strips || 1) : i.qty)}${i.unit === 'strip' ? ' شريط' : ''}</td><td>${money(i.total)}</td></tr>`).join('')}</tbody></table><hr>
+   <div class="c" style="font-size:11px">عدد الأصناف: ${Object.keys(merged).length}</div>
    <div style="display:flex;justify-content:space-between"><span>الإجمالي</span><span>${money(s.subtotal)}</span></div>
    ${s.discount ? `<div style="display:flex;justify-content:space-between"><span>الخصم</span><span>${money(s.discount)}</span></div>` : ''}
    <div style="display:flex;justify-content:space-between;font-size:15px"><b>الصافي</b><b>${money(s.total)} ${cur()}</b></div>

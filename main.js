@@ -139,7 +139,12 @@ ipcMain.handle('app:restore', async () => {
   db.run(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8')); migrate();
   return { ok: true };
 });
-ipcMain.handle('app:info', () => ({ version: app.getVersion(), dbFile, backups: path.join(app.getPath('userData'), 'backups'), backupDir: getCfg().backupDir || '' }));
+ipcMain.handle('app:info', () => {
+  const lastIn = (dir) => { try { const f = fs.readdirSync(dir).filter((x) => /^pharmacy-\d{4}-\d{2}-\d{2}\.db$/.test(x)).sort(); return f.length ? f[f.length - 1].slice(9, 19) : ''; } catch (e) { return ''; } };
+  const backups = path.join(app.getPath('userData'), 'backups');
+  const ext = getCfg().backupDir || '';
+  return { version: app.getVersion(), dbFile, backups, backupDir: ext, lastBackup: lastIn(backups), lastExtBackup: ext ? lastIn(ext) : '' };
+});
 ipcMain.handle('app:chooseBackupDir', async (_e, clear) => {
   if (clear) { setCfg({ backupDir: '' }); return { ok: true, dir: '' }; }
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });

@@ -38,11 +38,13 @@ Views.reports = async (el) => {
   } else {
     const cs = await Q('SELECT name, phone, balance FROM customers WHERE balance>0.001 ORDER BY balance DESC'), ss = await Q('SELECT name, phone, balance FROM suppliers WHERE balance>0.001 ORDER BY balance DESC');
     const csNeg = await Q('SELECT name, phone, balance FROM customers WHERE balance<-0.001 ORDER BY balance'), ssNeg = await Q('SELECT name, phone, balance FROM suppliers WHERE balance<-0.001 ORDER BY balance');
+    Views._debts = { cs, csNeg, ss, ssNeg };
     const cols = [{ h: 'الاسم', f: (r) => esc(r.name) }, { h: 'التليفون', f: (r) => esc(r.phone || '') }, { h: 'المبلغ', n: 1, f: (r) => money(r.balance) }];
     const colsAbs = [{ h: 'الاسم', f: (r) => esc(r.name) }, { h: 'التليفون', f: (r) => esc(r.phone || '') }, { h: 'المبلغ', n: 1, f: (r) => money(-r.balance) }];
-    body.innerHTML = `<div class="grid g2"><div><b>مديونيات العملاء (لينا)</b>${table(cols, cs, { empty: 'لا توجد' })}${csNeg.length ? `<div class="mt"><b>عملاء لهم فلوس عندنا</b>${table(colsAbs, csNeg)}</div>` : ''}</div><div><b>مستحقات الموردين (علينا)</b>${table(cols, ss, { empty: 'لا توجد' })}${ssNeg.length ? `<div class="mt"><b>موردين لنا عندهم (دفعنا زيادة)</b>${table(colsAbs, ssNeg)}</div>` : ''}</div></div>`;
+    body.innerHTML = `<div class="row mb"><span class="grow"></span><button class="btn sec" data-act="rp-csv-debts">⬇ تصدير المديونيات</button></div><div class="grid g2"><div><b>مديونيات العملاء (لينا)</b>${table(cols, cs, { empty: 'لا توجد' })}${csNeg.length ? `<div class="mt"><b>عملاء لهم فلوس عندنا</b>${table(colsAbs, csNeg)}</div>` : ''}</div><div><b>مستحقات الموردين (علينا)</b>${table(cols, ss, { empty: 'لا توجد' })}${ssNeg.length ? `<div class="mt"><b>موردين لنا عندهم (دفعنا زيادة)</b>${table(colsAbs, ssNeg)}</div>` : ''}</div></div>`;
   }
 };
+ACT['rp-csv-debts'] = () => { const d = Views._debts || { cs: [], csNeg: [], ss: [], ssNeg: [] }; downloadCSV('debts.csv', ['النوع', 'الاسم', 'التليفون', 'المبلغ'], [...d.cs.map((r) => ['عميل عليه', r.name, r.phone, r.balance]), ...d.csNeg.map((r) => ['عميل له', r.name, r.phone, -r.balance]), ...d.ss.map((r) => ['مورد له', r.name, r.phone, r.balance]), ...d.ssNeg.map((r) => ['مورد عليه', r.name, r.phone, -r.balance])]); };
 ACT['rp-tab'] = (el) => { RP.tab = el.dataset.k; go('reports'); };
 ACT['rp-range'] = (el) => { RP.from = el.dataset.a; RP.to = el.dataset.b; go('reports'); };
 ACT['rp-csv-items'] = () => downloadCSV('top-items.csv', ['الصنف', 'الكمية', 'الإيراد', 'الربح'], (Views._ri || []).map((r) => [r.arabic || r.name, r.q, r.rev, r.profit]));

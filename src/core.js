@@ -297,11 +297,10 @@ function lockScreen() {
   $('#lko', ov).onclick = () => logout();
   ov.querySelector('form').onsubmit = async (e) => {
     e.preventDefault();
-    const u = await Q1('SELECT pin_hash FROM users WHERE id=?', [App.user.id]);
-    if (await verifyPin($('#lkp', ov).value, u.pin_hash)) { ov.remove(); lastAct = Date.now(); lockFails = 0; return; }
+    const u = await Q1('SELECT pin_hash, failed_count FROM users WHERE id=?', [App.user.id]);
+    if (await verifyPin($('#lkp', ov).value, u.pin_hash)) { if (u.failed_count) await X('UPDATE users SET failed_count=0 WHERE id=?', [App.user.id]); ov.remove(); lastAct = Date.now(); lockFails = 0; return; }
     lockFails++;
     await audit('دخول فاشل (شاشة القفل)', App.user.name);
-    const f = (App.user.failed_count || 0) + lockFails;
     if (lockFails >= 5) { await X('UPDATE users SET locked_until=? WHERE id=?', [Date.now() + 5 * 60000, App.user.id]); await audit('قفل حساب', App.user.name); ov.remove(); logout(); return; } // no unlimited guessing: after 5 wrong tries the full login (with lockout) applies
     $('#lke', ov).textContent = `الرقم السري غلط (${lockFails} من 5 وبعدها خروج)`; $('#lkp', ov).select();
   };
