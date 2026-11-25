@@ -1,0 +1,43 @@
+name: Build Windows installer
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['README.md']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: build-installer
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unpack project payload (first run only)
+        run: |
+          if ls payload-*.b64 >/dev/null 2>&1; then
+            cat payload-*.b64 | tr -d '\r\n ' | base64 -d > payload.tgz
+            tar xzf payload.tgz
+            git rm -q --cached payload-*.b64 || true
+            rm -f payload-*.b64 payload.tgz
+            git config user.name "github-actions"
+            git config user.email "actions@github.com"
+            git add -A
+            git commit -m "Add project source" || true
+            git push || true
+          fi
+      - run: npm install --no-audit --no-fund
+      - run: npm run dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete v1.0.0 --yes --cleanup-tag || true
+          gh release create v1.0.0 dist/*.exe --title "Pharmacy System 1.0.0" --notes "نظام الصيدلية: ملف تثبيت ويندوز. الدخول الافتراضي: المدير / 1234"
