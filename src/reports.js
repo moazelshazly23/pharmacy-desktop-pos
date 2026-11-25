@@ -24,8 +24,10 @@ Views.reports = async (el) => {
     const rows = await Q('SELECT d.arabic, d.name, SUM(si.qty - si.returned_qty) q, SUM(si.total * (si.qty - si.returned_qty) / si.qty * (CASE WHEN s.subtotal > 0 THEN s.total / s.subtotal ELSE 1 END)) rev, SUM(si.total * (si.qty - si.returned_qty) / si.qty * (CASE WHEN s.subtotal > 0 THEN s.total / s.subtotal ELSE 1 END) - si.cost * (si.qty - si.returned_qty)) profit FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN drugs d ON d.id=si.drug_id WHERE s.date BETWEEN ? AND ? GROUP BY si.drug_id ORDER BY q DESC LIMIT 100', [f, t]);
     body.innerHTML = `<div class="row mb"><span class="grow"></span><button class="btn sec" data-act="rp-csv-items">⬇ تصدير</button></div>` + table([{ h: 'الصنف', f: (r) => esc(r.arabic || r.name) }, { h: 'الكمية (علب)', n: 1, f: (r) => qtyf(r.q) }, { h: 'الإيراد', n: 1, f: (r) => money(r.rev) }, { h: 'الربح', n: 1, f: (r) => money(r.profit) }], rows, { empty: 'لا توجد مبيعات في الفترة' }); Views._ri = rows;
   } else if (RP.tab === 'users') {
-    const rows = await Q('SELECT u.name, COUNT(*) n, SUM(s.total) total, SUM(s.discount) disc FROM sales s LEFT JOIN users u ON u.id=s.user_id WHERE s.date BETWEEN ? AND ? GROUP BY s.user_id ORDER BY total DESC', [f, t]);
-    body.innerHTML = table([{ h: 'الكاشير', f: (r) => esc(r.name || '—') }, { h: 'عدد الفواتير', n: 1, f: 'n' }, { h: 'المبيعات', n: 1, f: (r) => money(r.total) }, { h: 'الخصومات', n: 1, f: (r) => money(r.disc) }], rows, { empty: 'لا توجد مبيعات' });
+    const rows = await Q(`SELECT u.name, COUNT(*) n, COALESCE(SUM(s.total),0) total, COALESCE(SUM(s.discount),0) disc,
+      (SELECT COALESCE(SUM(r.total),0) FROM sale_returns r WHERE r.user_id=s.user_id AND r.date BETWEEN ? AND ?) rets
+      FROM sales s LEFT JOIN users u ON u.id=s.user_id WHERE s.date BETWEEN ? AND ? GROUP BY s.user_id ORDER BY total DESC`, [f, t, f, t]);
+    body.innerHTML = table([{ h: 'الكاشير', f: (r) => esc(r.name || '—') }, { h: 'عدد الفواتير', n: 1, f: 'n' }, { h: 'المبيعات', n: 1, f: (r) => money(r.total) }, { h: 'المرتجعات', n: 1, f: (r) => money(r.rets) }, { h: 'الصافي', n: 1, f: (r) => money(r.total - r.rets) }, { h: 'الخصومات', n: 1, f: (r) => money(r.disc) }], rows, { empty: 'لا توجد مبيعات' });
   } else if (RP.tab === 'days') {
     const rows = await Q(`SELECT x.d, SUM(x.n) n, SUM(x.total) total, SUM(x.profit) profit FROM (
       SELECT substr(date,1,10) d, COUNT(*) n, SUM(total) total, SUM(total-cost_total) profit FROM sales WHERE date BETWEEN ? AND ? GROUP BY d
@@ -35,8 +37,10 @@ Views.reports = async (el) => {
     body.innerHTML = table([{ h: 'اليوم', f: 'd' }, { h: 'فواتير', n: 1, f: 'n' }, { h: 'المبيعات', n: 1, f: (r) => money(r.total) }, { h: 'مجمل الربح', n: 1, f: (r) => money(r.profit) }], rows, { empty: 'لا توجد مبيعات' });
   } else {
     const cs = await Q('SELECT name, phone, balance FROM customers WHERE balance>0.001 ORDER BY balance DESC'), ss = await Q('SELECT name, phone, balance FROM suppliers WHERE balance>0.001 ORDER BY balance DESC');
+    const csNeg = await Q('SELECT name, phone, balance FROM customers WHERE balance<-0.001 ORDER BY balance'), ssNeg = await Q('SELECT name, phone, balance FROM suppliers WHERE balance<-0.001 ORDER BY balance');
     const cols = [{ h: 'الاسم', f: (r) => esc(r.name) }, { h: 'التليفون', f: (r) => esc(r.phone || '') }, { h: 'المبلغ', n: 1, f: (r) => money(r.balance) }];
-    body.innerHTML = `<div class="grid g2"><div><b>مديونيات العملاء (لينا)</b>${table(cols, cs, { empty: 'لا توجد' })}</div><div><b>مستحقات الموردين (علينا)</b>${table(cols, ss, { empty: 'لا توجد' })}</div></div>`;
+    const colsAbs = [{ h: 'الاسم', f: (r) => esc(r.name) }, { h: 'التليفون', f: (r) => esc(r.phone || '') }, { h: 'المبلغ', n: 1, f: (r) => money(-r.balance) }];
+    body.innerHTML = `<div class="grid g2"><div><b>مديونيات العملاء (لينا)</b>${table(cols, cs, { empty: 'لا توجد' })}${csNeg.length ? `<div class="mt"><b>عملاء لهم فلوس عندنا</b>${table(colsAbs, csNeg)}</div>` : ''}</div><div><b>مستحقات الموردين (علينا)</b>${table(cols, ss, { empty: 'لا توجد' })}${ssNeg.length ? `<div class="mt"><b>موردين لنا عندهم (دفعنا زيادة)</b>${table(colsAbs, ssNeg)}</div>` : ''}</div></div>`;
   }
 };
 ACT['rp-tab'] = (el) => { RP.tab = el.dataset.k; go('reports'); };

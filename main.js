@@ -95,6 +95,7 @@ function migrate() {
   add('users', 'failed_count', 'INTEGER NOT NULL DEFAULT 0'); add('users', 'locked_until', 'INTEGER NOT NULL DEFAULT 0');
   add('customers', 'credit_limit', 'REAL NOT NULL DEFAULT 0');
   add('payments', 'method', "TEXT NOT NULL DEFAULT 'drawer'"); // drawer = in/out of the cash drawer, external = card/transfer: excluded from the shift count
+  add('payments', 'purchase_id', 'INTEGER'); // drawer payment created by a purchase invoice, so deleting the invoice can reverse it
   scheduleSave(true);
 }
 

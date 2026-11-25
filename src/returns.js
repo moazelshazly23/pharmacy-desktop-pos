@@ -12,6 +12,7 @@ async function openReturn(saleId) {
   const s = await Q1('SELECT s.*, c.name cname FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=?', [saleId]);
   if (!s) return toast('الفاتورة غير موجودة', 'err');
   const items = await Q('SELECT si.*, d.arabic, d.name, d.strips FROM sale_items si JOIN drugs d ON d.id=si.drug_id WHERE si.sale_id=?', [saleId]);
+  if (items.length && items.every((i) => i.qty - i.returned_qty <= 0.0001)) return toast('الفاتورة دي اترجعت بالكامل قبل كده', 'err');
   const m = modal(`مرتجع من فاتورة #${saleId}`, `<div class="small mute mb">${ftime(s.date)} · الإجمالي ${money(s.total)} ${s.cname ? '· ' + esc(s.cname) : ''}</div>` + table([{ h: 'الصنف', f: (i) => esc(i.arabic || i.name) }, { h: 'تشغيلة', f: (i) => i.batch_id || '' }, { h: 'المباع', n: 1, f: (i) => qtyf(i.qty) }, { h: 'سبق إرجاعه', n: 1, f: (i) => qtyf(i.returned_qty) }, { h: 'كمية المرتجع (علب)', f: (i) => `<input data-rq="${i.id}" value="0" style="width:80px" ${i.qty - i.returned_qty <= 0 ? 'disabled' : ''}>` }, { h: 'قيمة العلبة', n: 1, f: (i) => money(i.total / i.qty) }], items) +
     `<div class="row mt"><div class="field"><label>طريقة رد المبلغ</label><select id="r_m"><option value="cash">كاش من الدرج</option><option value="card">رد على الفيزا (مش من الدرج)</option>${s.customer_id ? '<option value="balance">خصم من حساب العميل</option>' : ''}</select></div><span class="grow"></span><div><span class="mute">قيمة المرتجع</span><div id="r_t" style="font-size:26px;font-weight:800;color:var(--danger)">0.00</div></div></div>`,
     { wide: true, footer: '<button class="btn danger" id="r_ok">تأكيد المرتجع</button>' });
@@ -33,6 +34,9 @@ async function openReturn(saleId) {
       else ops.push({ sql: "INSERT INTO batches(drug_id,batch_no,expiry,qty,cost,created_at) VALUES(?,'',NULL,?,?,?)", params: [it.drug_id, q, it.cost || 0, nowISO()] }); // original batch was deleted: keep the returned stock
     }
     total = r2(total); if (total <= 0) { $('#r_ok', m).disabled = false; return toast('حدد كمية المرتجع', 'err'); }
+    if ($('#r_m', m).value === 'cash' && s.cash + 0.001 < total) { // the drawer only received s.cash from this sale: refunding more than that in cash needs a conscious yes
+      if (!(await confirmBox(`الفاتورة اتدفع منها كاش ${money(s.cash)} فقط، والمرتجع هيطلع ${money(total)} كاش من الدرج. متأكد؟`, 'متابعة', true))) { $('#r_ok', m).disabled = false; return; }
+    }
     ops.push({ sql: 'UPDATE sale_returns SET total=?, cost_total=? WHERE id=?', params: [total, r2(cost), '@0'] });
     if ($('#r_m', m).value === 'balance' && s.customer_id) ops.push({ sql: 'UPDATE customers SET balance=balance-? WHERE id=?', params: [total, s.customer_id] });
     await api.tx(ops); await audit('مرتجع', `فاتورة #${saleId} بقيمة ${money(total)} (${$('#r_m', m).value})`); m.close(); toast(`تم المرتجع بقيمة ${money(total)}`, 'ok'); go('returns');

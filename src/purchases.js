@@ -7,8 +7,27 @@ Views.purchases = async (el) => {
     table([{ h: '#', f: 'id' }, { h: 'التاريخ', f: (p) => fdate(p.date) }, { h: 'المورد', f: (p) => esc(p.sname || '—') }, { h: 'رقم فاتورة المورد', f: (p) => esc(p.invoice_no || '') }, { h: 'الإجمالي', n: 1, f: (p) => money(p.total) }, { h: 'المدفوع', n: 1, f: (p) => money(p.paid) }, { h: 'المتبقي', n: 1, f: (p) => (p.total - p.paid > 0.001 ? `<span class="pill red">${money(p.total - p.paid)}</span>` : '—') }, { h: '', f: (p) => `<button class="btn sec sm" data-act="pur-view" data-id="${p.id}">عرض</button>` }], list, { empty: 'لا توجد فواتير شراء بعد' });
 };
 ACT['pur-view'] = async (el) => {
-  const items = await Q('SELECT pi.*, d.arabic, d.name FROM purchase_items pi JOIN drugs d ON d.id=pi.drug_id WHERE purchase_id=?', [el.dataset.id]);
-  modal('فاتورة شراء #' + el.dataset.id, table([{ h: 'الصنف', f: (i) => esc(i.arabic || i.name) }, { h: 'تشغيلة', f: (i) => esc(i.batch_no || '') }, { h: 'صلاحية', f: (i) => fdate(i.expiry) }, { h: 'الكمية', n: 1, f: (i) => qtyf(i.qty) }, { h: 'التكلفة', n: 1, f: (i) => money(i.cost) }, { h: 'الإجمالي', n: 1, f: (i) => money(i.qty * i.cost) }], items), { wide: true });
+  const pid = +el.dataset.id;
+  const p = await Q1('SELECT p.*, s.name sname FROM purchases p LEFT JOIN suppliers s ON s.id=p.supplier_id WHERE p.id=?', [pid]);
+  const items = await Q('SELECT pi.*, d.arabic, d.name FROM purchase_items pi JOIN drugs d ON d.id=pi.drug_id WHERE purchase_id=?', [pid]);
+  const m = modal('فاتورة شراء #' + pid, `<div class="small mute mb">${fdate(p?.date)}${p?.sname ? ' · ' + esc(p.sname) : ''} · الإجمالي ${money(p?.total)} · المدفوع ${money(p?.paid)}</div>` + table([{ h: 'الصنف', f: (i) => esc(i.arabic || i.name) }, { h: 'تشغيلة', f: (i) => esc(i.batch_no || '') }, { h: 'صلاحية', f: (i) => fdate(i.expiry) }, { h: 'الكمية', n: 1, f: (i) => qtyf(i.qty) }, { h: 'التكلفة', n: 1, f: (i) => money(i.cost) }, { h: 'الإجمالي', n: 1, f: (i) => money(i.qty * i.cost) }], items),
+    { wide: true, footer: isAdmin() ? '<button class="btn danger" id="pv_del">حذف الفاتورة وعكس أثرها</button>' : undefined });
+  const del = $('#pv_del', m);
+  if (del) del.onclick = async () => {
+    const used = await Q1('SELECT COUNT(*) c FROM sale_items si JOIN purchase_items pi ON pi.batch_id=si.batch_id WHERE pi.purchase_id=?', [pid]);
+    if (used.c > 0) return toast('مينفعش تتحذف: فيه مبيعات اتعملت من تشغيلاتها. اعمل مرتجع أو تسوية جرد بدل الحذف', 'err');
+    if (!(await confirmBox(`حذف فاتورة الشراء #${pid} هيشيل تشغيلاتها من المخزون ويرجّع رصيد المورد (${money(r2((p?.total || 0) - (p?.paid || 0)))}) ويشيل سداد الدرج المرتبط بها. متابعة؟`, 'حذف', true))) return;
+    del.disabled = true;
+    await api.tx([
+      { sql: 'DELETE FROM batches WHERE purchase_id=?', params: [pid] },
+      { sql: 'DELETE FROM purchase_items WHERE purchase_id=?', params: [pid] },
+      { sql: 'DELETE FROM purchases WHERE id=?', params: [pid] },
+      ...(p?.supplier_id ? [{ sql: 'UPDATE suppliers SET balance=balance-? WHERE id=?', params: [r2(p.total - p.paid), p.supplier_id] }] : []),
+      { sql: 'DELETE FROM payments WHERE purchase_id=?', params: [pid] },
+    ]);
+    await audit('حذف فاتورة شراء', `#${pid} بقيمة ${money(p?.total)}${p?.sname ? ' - ' + p.sname : ''}`);
+    m.close(); toast('اتحذفت الفاتورة واتعكس أثرها', 'ok'); go('purchases');
+  };
 };
 ACT['pur-new'] = async () => {
   PUR.lines = []; PUR.supplier = null;
@@ -35,6 +54,7 @@ ACT['pur-new'] = async () => {
   $('#p_no', m).onclick = () => m.close();
   $('#p_ok', m).onclick = async () => {
     if (!PUR.lines.length) return ($('#p_e', m).textContent = 'أضف صنف واحد على الأقل');
+    if ($('#p_d', m).value && $('#p_d', m).value > today()) return ($('#p_e', m).textContent = 'تاريخ الفاتورة مينفعش يكون في المستقبل');
     for (const l of PUR.lines) { if (l.cost < 0 || l.price < 0) return ($('#p_e', m).textContent = 'التكلفة أو السعر بالسالب في: ' + l.name); if (l.qty <= 0) return ($('#p_e', m).textContent = 'الكمية لازم تكون أكبر من صفر: ' + l.name); if (l.exp && !monthToDate(l.exp)) return ($('#p_e', m).textContent = 'صيغة الصلاحية غلط في: ' + l.name); }
     const total = r2(PUR.lines.reduce((s, l) => s + l.qty * l.cost, 0)), paid = Math.max(0, Math.min(total, num($('#p_paid', m).value))), sid = $('#p_s', m).value || null;
     if ($('#p_ok', m).disabled) return;
@@ -49,7 +69,7 @@ ACT['pur-new'] = async () => {
       ops.push({ sql: 'INSERT INTO purchase_items(purchase_id,drug_id,batch_id,batch_no,expiry,qty,cost,price) VALUES(?,?,?,?,?,?,?,?)', params: ['@0', l.id, '@last', l.batch, ex, l.qty, l.cost, l.price] });
       ops.push({ sql: 'UPDATE drugs SET cost=?, price=CASE WHEN ?>0 THEN ? ELSE price END WHERE id=?', params: [l.cost, l.price, l.price, l.id] });
     }
-    if ($('#p_dr', m).checked && paid > 0) ops.push({ sql: "INSERT INTO payments(date,party_type,party_id,amount,user_id,shift_id,note) VALUES(?,'supplier',?,?,?,?,?)", params: [nowISO(), sid ? +sid : 0, paid, App.user.id, App.shift?.id || null, 'سداد فاتورة شراء من الدرج'] });
+    if ($('#p_dr', m).checked && paid > 0) ops.push({ sql: "INSERT INTO payments(date,party_type,party_id,amount,user_id,shift_id,note,method,purchase_id) VALUES(?,'supplier',?,?,?,?,?,'drawer',?)", params: [nowISO(), sid ? +sid : 0, paid, App.user.id, App.shift?.id || null, 'سداد فاتورة شراء من الدرج', '@0'] });
     if (sid && total - paid > 0) ops.push({ sql: 'UPDATE suppliers SET balance=balance+? WHERE id=?', params: [r2(total - paid), sid] });
     const pid = (await api.tx(ops))[0]; await audit('فاتورة شراء', `#${pid} بقيمة ${money(total)} مدفوع ${money(paid)}`); m.close(); toast('تم حفظ فاتورة الشراء وتحديث المخزون', 'ok'); go('purchases');
     } catch (e) { $('#p_ok', m).disabled = false; throw e; }

@@ -4,7 +4,7 @@ Views.parties = async (el) => {
   el.style.padding = '18px 22px';
   const isC = PartyState.tab === 'customers', tb = isC ? 'customers' : 'suppliers';
   const qq = `%${PartyState.q.trim()}%`;
-  const rows = await Q(`SELECT * FROM ${tb} WHERE name LIKE ? OR phone LIKE ? ORDER BY balance DESC, name`, [qq, qq]);
+  const rows = await Q(`SELECT * FROM ${tb} WHERE name LIKE ? OR phone LIKE ? ORDER BY balance DESC, name LIMIT 500`, [qq, qq]);
   const owed = rows.reduce((s, r) => s + Math.max(0, r.balance), 0);
   el.innerHTML = `<div class="tabs"><button data-act="party-tab" data-k="customers" class="${isC ? 'on' : ''}">العملاء</button><button data-act="party-tab" data-k="suppliers" class="${!isC ? 'on' : ''}">الموردين</button></div>
    <div class="row mb"><button class="btn" data-act="party-new">+ ${isC ? 'عميل جديد' : 'مورد جديد'}</button><input id="pq" placeholder="بحث بالاسم أو التليفون" value="${esc(PartyState.q)}" style="width:220px"><span class="grow"></span><div class="stat" style="padding:8px 16px"><span class="l">${isC ? 'إجمالي المديونيات على العملاء' : 'إجمالي المستحق للموردين'}</span> <b style="font-size:20px;color:var(--danger)">${money(owed)}</b></div></div>` +
@@ -18,7 +18,17 @@ function partyForm(tb, p) {
   return new Promise((res) => {
     const isC = tb === 'customers';
     const m = modal(p ? 'تعديل' : isC ? 'عميل جديد' : 'مورد جديد', `<div class="grid g2"><div class="field"><label>الاسم</label><input id="pf_n" value="${esc(p?.name || '')}"></div><div class="field"><label>التليفون</label><input id="pf_p" class="ltr" value="${esc(p?.phone || '')}"></div>
-     ${isC ? `<div class="field" style="grid-column:1/3"><label>أمراض مزمنة / ملاحظات صحية (اختياري)</label><input id="pf_c" value="${esc(p?.chronic || '')}"></div><div class="field"><label>حد الائتمان للبيع الآجل (0 = بدون حد)</label><input id="pf_l" value="${p?.credit_limit || 0}" inputmode="decimal"></div>` : ''}</div><div class="err" id="pf_e"></div>`, { footer: '<button class="btn" id="pf_ok">حفظ</button>', onClose: () => res(null) });
+     ${isC ? `<div class="field" style="grid-column:1/3"><label>أمراض مزمنة / ملاحظات صحية (اختياري)</label><input id="pf_c" value="${esc(p?.chronic || '')}"></div><div class="field"><label>حد الائتمان للبيع الآجل (0 = بدون حد)</label><input id="pf_l" value="${p?.credit_limit || 0}" inputmode="decimal"></div>` : ''}</div><div class="err" id="pf_e"></div>`, { footer: '<button class="btn" id="pf_ok">حفظ</button>' + (p && isAdmin() ? '<button class="btn danger" id="pf_del">حذف</button>' : ''), onClose: () => res(null) });
+    const del = $('#pf_del', m);
+    if (del) del.onclick = async () => {
+      if (Math.abs(num(p.balance)) > 0.01) return ($('#pf_e', m).textContent = 'مينفعش حذف حساب عليه رصيد. صفّر الرصيد الأول');
+      const ops = await Q1(isC ? 'SELECT COUNT(*) c FROM sales WHERE customer_id=?' : 'SELECT COUNT(*) c FROM purchases WHERE supplier_id=?', [p.id]);
+      const pays = await Q1('SELECT COUNT(*) c FROM payments WHERE party_type=? AND party_id=?', [isC ? 'customer' : 'supplier', p.id]);
+      if (ops.c || pays.c) return ($('#pf_e', m).textContent = 'مينفعش يتحذف لأن له عمليات مسجلة (' + ops.c + ' حركة و' + pays.c + ' دفعة). سيبه من غير استخدام');
+      if (!(await confirmBox(`حذف ${isC ? 'العميل' : 'المورد'} "${esc(p.name)}" نهائياً؟`, 'حذف', true))) return;
+      await X(`DELETE FROM ${tb} WHERE id=?`, [p.id]); await audit(isC ? 'حذف عميل' : 'حذف مورد', p.name);
+      m.remove(); res(null); if (App.view === 'parties') go('parties');
+    };
     $('#pf_ok', m).onclick = async () => {
       const n = $('#pf_n', m).value.trim(); if (!n) return ($('#pf_e', m).textContent = 'اكتب الاسم');
       if (!p && !(await confirmDupParty(tb, n, $('#pf_p', m).value.trim()))) return;

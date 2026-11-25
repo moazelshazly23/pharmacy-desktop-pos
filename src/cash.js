@@ -15,9 +15,10 @@ Views.cash = async (el) => {
   const exps = await Q('SELECT e.*, u.name uname FROM expenses e LEFT JOIN users u ON u.id=e.user_id ORDER BY e.id DESC LIMIT 60');
   const shifts = await Q('SELECT s.*, u.name uname FROM shifts s LEFT JOIN users u ON u.id=s.user_id ORDER BY s.id DESC LIMIT 30');
   let sh = '';
+  const opener = App.shift ? await Q1('SELECT name FROM users WHERE id=?', [App.shift.user_id]) : null;
   if (App.shift) {
     const t = await shiftSummary(App.shift);
-    sh = `<div class="card mb"><div class="row mb"><b style="font-size:16px">الوردية الحالية</b><span class="pill">فُتحت ${ftime(App.shift.opened_at)}</span><span class="grow"></span><button class="btn danger" data-act="shift-close">إقفال الوردية وجرد الدرج</button></div>
+    sh = `<div class="card mb"><div class="row mb"><b style="font-size:16px">الوردية الحالية</b><span class="pill">فُتحت ${ftime(App.shift.opened_at)}${opener ? ' · ' + esc(opener.name) : ''}</span><span class="grow"></span><button class="btn danger" data-act="shift-close">إقفال الوردية وجرد الدرج</button></div>
     <div class="grid g4"><div class="stat"><div class="l">مبيعات الوردية (${t.n} فاتورة)</div><div class="v">${money(t.total)}</div></div><div class="stat"><div class="l">كاش</div><div class="v">${money(t.cash)}</div></div><div class="stat"><div class="l">فيزا</div><div class="v">${money(t.card)}</div></div><div class="stat p"><div class="l">المتوقع في الدرج</div><div class="v">${money(t.expected)}</div></div></div>
     <div class="small mute mt">المتوقع = رصيد الافتتاح ${money(App.shift.opening_cash)} + كاش المبيعات + التحصيلات − مرتجعات كاش − المصروفات − سداد الموردين</div></div>`;
   } else sh = `<div class="card mb row"><b>لا توجد وردية مفتوحة</b><span class="mute small">افتح وردية عشان كل العمليات تتحسب على الدرج.</span><span class="grow"></span><button class="btn lg" data-act="shift-open">فتح وردية</button></div>`;
@@ -25,7 +26,8 @@ Views.cash = async (el) => {
    <div><div class="row mb"><b style="font-size:16px">سجل الورديات</b></div>${table([{ h: '#', f: 'id' }, { h: 'الكاشير', f: (s) => esc(s.uname || '') }, { h: 'الفتح', f: (s) => ftime(s.opened_at) }, { h: 'الإقفال', f: (s) => ftime(s.closed_at) || '<span class="pill">مفتوحة</span>' }, { h: 'المتوقع', n: 1, f: (s) => (s.expected_cash == null ? '' : money(s.expected_cash)) }, { h: 'الفعلي', n: 1, f: (s) => (s.counted_cash == null ? '' : money(s.counted_cash)) }, { h: 'الفرق', n: 1, f: (s) => (s.counted_cash == null ? '' : `<span class="pill ${Math.abs(s.counted_cash - s.expected_cash) < 0.01 ? '' : 'red'}">${money(s.counted_cash - s.expected_cash)}</span>`) }], shifts, { empty: 'لا توجد ورديات' })}</div></div>`;
 };
 ACT['shift-open'] = async () => {
-  if (await currentShift()) return toast('عندك وردية مفتوحة بالفعل', 'err');
+  const open = await currentShift();
+  if (open) { const o = await Q1('SELECT name FROM users WHERE id=?', [open.user_id]); return toast('فيه وردية مفتوحة بالفعل' + (o ? ` (فتحها ${o.name})` : '') + '. الدرج واحد: اقفلها الأول لو عايز وردية جديدة', 'err'); }
   const v = await promptBox('فتح وردية', 'رصيد الدرج الافتتاحي (كاش)', '0', 'number'); if (v === null) return;
   if (num(v) < 0) return toast('رصيد الافتتاح مينفعش يكون بالسالب', 'err');
   const r = await X('INSERT INTO shifts(user_id,opened_at,opening_cash) VALUES(?,?,?)', [App.user.id, nowISO(), num(v)]);
@@ -56,8 +58,9 @@ ACT['exp-new'] = async () => {
 
 async function printShiftReport(sh, t, counted) {
   const S = App.settings, row = (a, b) => `<div style="display:flex;justify-content:space-between"><span>${a}</span><span>${b}</span></div>`;
+  const op = (await Q1('SELECT name FROM users WHERE id=?', [sh.user_id]))?.name || '';
   $('#receipt').innerHTML = `<h3>${esc(S.pharmacy_name)}</h3><div class="c"><b>تقرير إقفال وردية #${sh.id}</b></div><hr>
-   <div>الكاشير: ${esc(App.user.name)}</div><div>الفتح: ${ftime(sh.opened_at)}</div><div>الإقفال: ${ftime(nowISO())}</div><hr>
+   <div>فتحها: ${esc(op)}</div><div>أقفلها: ${esc(App.user.name)}</div><div>الفتح: ${ftime(sh.opened_at)}</div><div>الإقفال: ${ftime(nowISO())}</div><hr>
    ${row('عدد الفواتير', t.n)}${row('إجمالي المبيعات', money(t.total))}${row('كاش', money(t.cash))}${row('فيزا', money(t.card))}${row('آجل', money(t.credit))}<hr>
    ${row('رصيد الافتتاح', money(sh.opening_cash))}${row('تحصيلات كاش', money(t.custPay))}${row('مرتجعات كاش', money(t.returnsCash))}${row('سداد موردين', money(t.supPay))}${row('مصروفات', money(t.expenses))}<hr>
    ${row('<b>المتوقع في الدرج</b>', '<b>' + money(t.expected) + '</b>')}${row('الفعلي (جرد)', money(counted))}${row('<b>الفرق</b>', '<b>' + money(counted - t.expected) + '</b>')}<hr><div class="c">توقيع: ____________</div>`;

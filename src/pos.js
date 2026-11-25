@@ -51,6 +51,7 @@ Views.pos = async (el) => {
   });
   q.addEventListener('blur', () => setTimeout(hideRes, 180));
   el.addEventListener('keydown', (e) => {
+    if (document.querySelector('.ov')) return; // a dialog (payment, held, ...) owns the keyboard now
     if (e.key === 'F9') { e.preventDefault(); ACT['pos-pay'](); }
     if (e.key === 'F6') { e.preventDefault(); ACT['pos-hold'](); }
     if (e.key === 'Delete' && document.activeElement === q && !q.value) { POS.cart.pop(); renderCart(); }
@@ -76,7 +77,9 @@ async function unknownBarcode(code) {
     const r = await searchDrugs($('#lk', m).value, { limit: 15, withStock: false });
     $('#lkr', m).innerHTML = r.map((d) => `<div class="res" data-i="${d.id}"><div class="grow"><div class="nm">${esc(d.arabic || d.name)}</div><div class="en">${esc(d.name)}${d.barcode ? ' · لديه باركود ' + esc(d.barcode) : ''}</div></div><div class="pr">${money(d.price)}</div></div>`).join('');
     $$('.res', m).forEach((n) => (n.onclick = async () => {
-      await X('UPDATE drugs SET barcode=?, search=search||? WHERE id=?', [code, ' ' + code, n.dataset.i]);
+      const dup = await Q1('SELECT id, arabic, name FROM drugs WHERE barcode=? AND id<>?', [code, n.dataset.i]);
+      if (dup) { toast('الباركود ده مسجل على صنف تاني: ' + (dup.arabic || dup.name || '') + '. صحّح الباركود من شاشة الأصناف الأول', 'err'); return; }
+      await X("UPDATE drugs SET barcode=?, search=COALESCE(search,'')||? WHERE id=?", [code, ' ' + code, n.dataset.i]);
       const d = await getDrug(n.dataset.i); m.close(); await addToCart(d); toast('تم ربط الباركود بالصنف', 'ok'); $('#q').value = ''; $('#q').focus();
     }));
   }, 150);
@@ -131,7 +134,7 @@ function renderTotals() {
    <div class="row" style="margin:6px 0"><span class="mute">العميل</span><span class="grow b" id="custname">${POS.customer ? esc(POS.customer.name) : 'نقدي'}</span><button class="btn sec sm" data-act="pos-customer">اختيار</button></div>
    <div class="grand"><span>الصافي</span><b>${money(tot)}</b></div>
    <button class="btn lg" style="width:100%" data-act="pos-pay" ${POS.cart.length ? '' : 'disabled'}>💳 دفع (F9)</button>`;
-  $('#dv').onchange = (e) => { POS.discVal = num(e.target.value); renderCart(); };
+  $('#dv').onchange = (e) => { POS.discVal = Math.max(0, num(e.target.value)); renderCart(); }; // a negative discount would silently raise the invoice
   $('#dt').onchange = (e) => { POS.discType = e.target.value; renderCart(); };
 }
 document.addEventListener('change', (e) => {
@@ -140,7 +143,7 @@ document.addEventListener('change', (e) => {
   if (c === 'n') l.n = Math.max(0.01, num(e.target.value) || 1);
   if (c === 'unit') l.unit = e.target.value;
   if (c === 'disc') l.disc = Math.min(Math.max(0, num(e.target.value)), lineGross(l));
-  if (c === 'price') { const v = num(e.target.value); l.price = l.unit === 'strip' ? v * l.strips : v; }
+  if (c === 'price') { const v = Math.max(0, num(e.target.value)); l.price = l.unit === 'strip' ? v * l.strips : v; } // no negative prices: a negative line would flip the invoice total
   renderCart();
 });
 ACT['pos-qty'] = (el) => { const l = POS.cart[+el.dataset.i]; l.n = Math.max(1, l.n + +el.dataset.d); renderCart(); };
@@ -200,7 +203,7 @@ ACT['pos-pay'] = async () => {
     let cash = 0, card = 0, credit = 0;
     if (mode === 'cash') { cash = total; if (num($('#tend', m).value) < total - 0.001) { $('#pe', m).textContent = 'المبلغ المدفوع أقل من المطلوب (استخدم آجل أو مختلط)'; return; } }
     else if (mode === 'card') card = total;
-    else if (mode === 'credit') { const adv = num($('#cash2', m).value); if (adv < 0) { $('#pe', m).textContent = 'مينفعش مبلغ بالسالب'; return; } cash = Math.min(total, adv); credit = r2(total - cash); }
+    else if (mode === 'credit') { const adv = num($('#cash2', m).value); if (adv < 0) { $('#pe', m).textContent = 'مينفعش مبلغ بالسالب'; return; } if (adv > total + 0.001) { $('#pe', m).textContent = 'المدفوع مقدماً أكبر من قيمة الفاتورة. لو فيه فرق، سجّله تحصيل بعد البيع'; return; } cash = r2(adv); credit = r2(total - cash); }
     else { cash = num($('#mc', m).value); card = num($('#mv', m).value); credit = num($('#mr', m).value); if (cash < 0 || card < 0 || credit < 0) { $('#pe', m).textContent = 'مينفعش مبلغ بالسالب'; return; } if (Math.abs(cash + card + credit - total) > 0.01) { $('#pe', m).textContent = `مجموع الدفع (${money(cash + card + credit)}) لا يساوي المطلوب`; return; } }
     if (credit > 0 && !POS.customer) { $('#pe', m).textContent = 'اختار عميل للبيع الآجل'; return; }
     const cap = num(App.settings.cashier_max_disc);
@@ -209,6 +212,8 @@ ACT['pos-pay'] = async () => {
       const cu = await Q1('SELECT balance, credit_limit FROM customers WHERE id=?', [POS.customer.id]);
       if (cu && cu.credit_limit > 0 && cu.balance + credit > cu.credit_limit + 0.001) { $('#pe', m).textContent = `البيع الآجل هيعدي حد الائتمان للعميل (${money(cu.credit_limit)}). المديونية الحالية ${money(cu.balance)}`; return; }
     }
+    const free = POS.cart.find((l) => !(unitPrice(l) > 0));
+    if (free) { $('#pe', m).textContent = `الصنف "${free.name}" بسعر صفر. عدّل سعره من شاشة الأصناف قبل البيع`; return; }
     $('#pok', m).disabled = true;
     try {
       const id = await saveSale({ cash, card, credit, delivery: $('#pdel', m).checked ? 1 : 0 });

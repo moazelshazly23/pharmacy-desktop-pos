@@ -168,7 +168,8 @@ function stockPill(s, min = 0) {
 
 // ---------- auth / shift ----------
 async function currentShift() {
-  App.shift = (await Q1('SELECT * FROM shifts WHERE closed_at IS NULL AND user_id=? ORDER BY id DESC LIMIT 1', [App.user.id])) || null;
+  // The drawer is shared on one device: the open shift belongs to whoever opened it, but everyone sells into it and anyone can close it.
+  App.shift = (await Q1('SELECT * FROM shifts WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1')) || null;
   if (App.shift) App.warnedShift = false; // allow the no-shift warning again if the shift gets closed
   return App.shift;
 }
@@ -195,8 +196,11 @@ function renderLogin() {
       if (!String(u.pin_hash).startsWith('pbkdf2$')) { u.pin_hash = await hashPin($('#lp').value); await X('UPDATE users SET pin_hash=? WHERE id=?', [u.pin_hash, u.id]); }
       await X('UPDATE users SET failed_count=0, locked_until=0 WHERE id=?', [u.id]);
       App.user = u; await currentShift(); await audit('دخول', u.name);
+      let shiftOther = null;
+      if (App.shift && App.shift.user_id !== u.id) { const o = await Q1('SELECT name FROM users WHERE id=?', [App.shift.user_id]); shiftOther = o?.name; }
       if (u.must_change) await forceChangePin();
       renderShell(); startIdleLock(); go(can('pos') ? 'pos' : 'items');
+      if (shiftOther) setTimeout(() => toast(`الوردية المفتوحة فتحها ${shiftOther}. الدرج مشترك: مبيعاتك بتتحسب على نفس الوردية`, ''), 700);
     };
   });
 }
@@ -267,7 +271,7 @@ document.addEventListener('click', (e) => {
   if (el && ACT[el.dataset.act]) { e.preventDefault(); Promise.resolve(ACT[el.dataset.act](el, e)).catch((err) => { console.error(err); toast('خطأ: ' + err.message, 'err'); }); }
 });
 document.addEventListener('keydown', (e) => {
-  if (!App.user) return;
+  if (!App.user || document.querySelector('.ov')) return; // no view jumping while a dialog is open
   if (e.key === 'F2') { e.preventDefault(); go('pos'); }
   if (e.key === 'F3') { e.preventDefault(); go('items'); }
 });
