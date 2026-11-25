@@ -7,7 +7,7 @@ Views.reports = async (el) => {
   const f = RP.from + 'T00:00:00', t = RP.to + 'T23:59:59';
   const preset = (a, b) => `data-act="rp-range" data-a="${a}" data-b="${b}"`;
   const d = today(), mStart = d.slice(0, 8) + '01';
-  el.innerHTML = `<div class="row mb"><div class="tabs" style="margin:0">${[['sum', 'الملخص والأرباح'], ['items', 'الأصناف الأكثر مبيعاً'], ['users', 'حسب الكاشير'], ['days', 'يومي'], ['debts', 'المديونيات']].map(([k, n]) => `<button data-act="rp-tab" data-k="${k}" class="${RP.tab === k ? 'on' : ''}">${n}</button>`).join('')}</div><span class="grow"></span>
+  el.innerHTML = `<div class="row mb"><div class="tabs" style="margin:0">${[['sum', 'الملخص والأرباح'], ['items', 'الأصناف الأكثر مبيعاً'], ['users', 'حسب الكاشير'], ['days', 'يومي'], ['inv', 'الفواتير'], ['debts', 'المديونيات']].map(([k, n]) => `<button data-act="rp-tab" data-k="${k}" class="${RP.tab === k ? 'on' : ''}">${n}</button>`).join('')}</div><span class="grow"></span>
    <button class="btn sec sm" ${preset(d, d)}>اليوم</button><button class="btn sec sm" ${preset(addDays(d, -1), addDays(d, -1))}>أمس</button><button class="btn sec sm" ${preset(addDays(d, -6), d)}>7 أيام</button><button class="btn sec sm" ${preset(mStart, d)}>الشهر</button>
    <input type="date" id="rf" value="${RP.from}"><span>إلى</span><input type="date" id="rt" value="${RP.to}"></div><div id="rb"></div>`;
   $('#rf').onchange = $('#rt').onchange = () => { RP.from = $('#rf').value; RP.to = $('#rt').value; go('reports'); };
@@ -35,6 +35,11 @@ Views.reports = async (el) => {
       SELECT substr(date,1,10) d, 0 n, -SUM(total) total, SUM(cost_total)-SUM(total) profit FROM sale_returns WHERE date BETWEEN ? AND ? GROUP BY d
     ) x GROUP BY x.d ORDER BY x.d DESC`, [f, t, f, t]);
     body.innerHTML = table([{ h: 'اليوم', f: 'd' }, { h: 'فواتير', n: 1, f: 'n' }, { h: 'المبيعات', n: 1, f: (r) => money(r.total) }, { h: 'مجمل الربح', n: 1, f: (r) => money(r.profit) }], rows, { empty: 'لا توجد مبيعات' });
+  } else if (RP.tab === 'inv') {
+    const q = (RP.q || '').trim();
+    const rows = await Q(`SELECT s.id, s.date, s.total, s.discount, c.name cname, u.name uname FROM sales s LEFT JOIN customers c ON c.id=s.customer_id LEFT JOIN users u ON u.id=s.user_id WHERE s.date BETWEEN ? AND ? AND (?='' OR CAST(s.id AS TEXT)=? OR c.name LIKE ?) ORDER BY s.id DESC LIMIT 300`, [f, t, q, q, '%' + q + '%']);
+    body.innerHTML = `<div class="row mb"><input id="rinv" placeholder="رقم الفاتورة أو اسم العميل" value="${esc(q)}" style="width:260px"><button class="btn" data-act="rp-inv-find">بحث</button><span class="mute small">بيعرض آخر 300 فاتورة في الفترة</span></div>` + table([{ h: 'رقم', f: 'id' }, { h: 'الوقت', f: (r) => ftime(r.date) }, { h: 'العميل', f: (r) => esc(r.cname || 'نقدي') }, { h: 'الكاشير', f: (r) => esc(r.uname || '') }, { h: 'الإجمالي', n: 1, f: (r) => money(r.total) }, { h: '', f: (r) => `<button class="btn sec sm" data-act="rp-inv-print" data-id="${r.id}">🖨 طباعة</button> <button class="btn sec sm" data-act="rp-inv-ret" data-id="${r.id}">مرتجع</button>` }], rows, { empty: 'مفيش فواتير' });
+    const ri = $('#rinv'); if (ri) ri.addEventListener('keydown', (e) => { if (e.key === 'Enter') ACT['rp-inv-find'](); });
   } else {
     const cs = await Q('SELECT name, phone, balance FROM customers WHERE balance>0.001 ORDER BY balance DESC'), ss = await Q('SELECT name, phone, balance FROM suppliers WHERE balance>0.001 ORDER BY balance DESC');
     const csNeg = await Q('SELECT name, phone, balance FROM customers WHERE balance<-0.001 ORDER BY balance'), ssNeg = await Q('SELECT name, phone, balance FROM suppliers WHERE balance<-0.001 ORDER BY balance');
@@ -48,3 +53,6 @@ ACT['rp-csv-debts'] = () => { const d = Views._debts || { cs: [], csNeg: [], ss:
 ACT['rp-tab'] = (el) => { RP.tab = el.dataset.k; go('reports'); };
 ACT['rp-range'] = (el) => { RP.from = el.dataset.a; RP.to = el.dataset.b; go('reports'); };
 ACT['rp-csv-items'] = () => downloadCSV('top-items.csv', ['الصنف', 'الكمية', 'الإيراد', 'الربح'], (Views._ri || []).map((r) => [r.arabic || r.name, r.q, r.rev, r.profit]));
+ACT['rp-inv-find'] = () => { RP.q = $('#rinv').value; go('reports'); };
+ACT['rp-inv-print'] = (el) => printReceipt(+el.dataset.id, { force: true });
+ACT['rp-inv-ret'] = async (el) => { if (!can('returns')) return; await go('returns'); openReturn(+el.dataset.id); };

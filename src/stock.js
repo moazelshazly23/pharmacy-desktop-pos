@@ -24,5 +24,6 @@ Views.stock = async (el) => {
   }
 };
 ACT['stock-tab'] = (el) => { StockState.tab = el.dataset.k; go('stock'); };
-ACT['short-csv'] = () => downloadCSV('shortages.csv', ['الصنف', 'الشركة', 'الرصيد', 'حد الطلب'], (Views._short || []).map((d) => [d.arabic || d.name, d.company, d.stock, d.min_qty]));
+const suggestQty = (d) => Math.max(1, Math.ceil(d.min_qty * 2 - d.stock));
+ACT['short-csv'] = () => downloadCSV('shortages.csv', ['الصنف', 'الشركة', 'الرصيد', 'حد الطلب', 'الكمية المقترحة للطلب'], (Views._short || []).map((d) => [d.arabic || d.name, d.company, d.stock, d.min_qty, suggestQty(d)]));
 ACT['stock-csv'] = () => downloadCSV('stock.csv', ['الصنف', 'الرصيد', 'التكلفة', 'السعر', 'أقرب صلاحية'], (Views._all || []).map((d) => [d.arabic || d.name, d.stock, d.cost, d.price, d.nearest]));

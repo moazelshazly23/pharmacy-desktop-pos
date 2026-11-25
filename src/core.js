@@ -51,6 +51,7 @@ const App = { user: null, settings: {}, view: 'pos', shift: null, held: [] };
 const ACT = {}; // click actions: data-act="name"
 const ROLE_NAMES = { admin: 'مدير', pharmacist: 'صيدلي', cashier: 'كاشير' };
 const VIEWS = [
+  { id: 'home', ic: '🏠', t: 'الرئيسية', roles: ['admin', 'pharmacist'] },
   { id: 'pos', ic: '🧾', t: 'المبيعات', roles: ['admin', 'pharmacist', 'cashier'] },
   { id: 'items', ic: '💊', t: 'الأصناف', roles: ['admin', 'pharmacist', 'cashier'] },
   { id: 'stock', ic: '📦', t: 'المخزون والتنبيهات', roles: ['admin', 'pharmacist'], badge: true },
