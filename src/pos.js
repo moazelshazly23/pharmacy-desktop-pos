@@ -201,7 +201,7 @@ ACT['pos-pay'] = async () => {
     if (mode === 'cash') { cash = total; if (num($('#tend', m).value) < total - 0.001) { $('#pe', m).textContent = 'المبلغ المدفوع أقل من المطلوب (استخدم آجل أو مختلط)'; return; } }
     else if (mode === 'card') card = total;
     else if (mode === 'credit') { cash = Math.min(total, num($('#cash2', m).value)); credit = r2(total - cash); }
-    else { cash = num($('#mc', m).value); card = num($('#mv', m).value); credit = num($('#mr', m).value); if (Math.abs(cash + card + credit - total) > 0.01) { $('#pe', m).textContent = `مجموع الدفع (${money(cash + card + credit)}) لا يساوي المطلوب`; return; } }
+    else { cash = num($('#mc', m).value); card = num($('#mv', m).value); credit = num($('#mr', m).value); if (cash < 0 || card < 0 || credit < 0) { $('#pe', m).textContent = 'مينفعش مبلغ بالسالب'; return; } if (Math.abs(cash + card + credit - total) > 0.01) { $('#pe', m).textContent = `مجموع الدفع (${money(cash + card + credit)}) لا يساوي المطلوب`; return; } }
     if (credit > 0 && !POS.customer) { $('#pe', m).textContent = 'اختار عميل للبيع الآجل'; return; }
     $('#pok', m).disabled = true;
     try {
@@ -225,7 +225,7 @@ async function saveSale({ cash, card, credit, delivery }) {
     const total_l = lineTotal(l), disc_l = num(l.disc), Q_all = need;
     const batches = await Q('SELECT * FROM batches WHERE drug_id=? AND qty>0 AND (expiry IS NULL OR expiry>=?) ORDER BY expiry IS NULL, expiry ASC, id ASC', [l.id, t]);
     const allocs = [];
-    for (const b of batches) { if (need <= 0.0000001) break; const avail = b.qty - (consumed[b.id] || 0); if (avail <= 0) continue; const take = Math.min(avail, need); consumed[b.id] = (consumed[b.id] || 0) + take; allocs.push({ batch: b.id, q: take, cost: b.cost }); need -= take; if (take > 0) ops.push({ sql: 'UPDATE batches SET qty=qty-? WHERE id=?', params: [take, b.id] }); }
+    for (const b of batches) { if (need <= 0.0000001) break; const avail = b.qty - (consumed[b.id] || 0); if (avail <= 0) continue; let take = Math.min(avail, need); if (l.unit === 'strip' && avail - take > 0 && avail - take < 0.0015) take = avail; /* strip rounding dust */ consumed[b.id] = (consumed[b.id] || 0) + take; allocs.push({ batch: b.id, q: take, cost: b.cost }); need -= take; if (take > 0) ops.push({ sql: 'UPDATE batches SET qty=qty-? WHERE id=?', params: [take, b.id] }); }
     if (need > 0.0000001) {
       const expd = await Q1('SELECT COALESCE(SUM(qty),0) q FROM batches WHERE drug_id=? AND qty>0 AND expiry IS NOT NULL AND expiry<?', [l.id, t]);
       if (expd.q > 0) throw new Error(`الصنف ${l.name}: الرصيد المتاح منتهي الصلاحية (${qtyf(expd.q)}) ومينفعش يتباع. اسحبه من الرف وصحّح الرصيد من الجرد`);

@@ -15,6 +15,7 @@ async function openReturn(saleId) {
   const m = modal(`مرتجع من فاتورة #${saleId}`, `<div class="small mute mb">${ftime(s.date)} · الإجمالي ${money(s.total)} ${s.cname ? '· ' + esc(s.cname) : ''}</div>` + table([{ h: 'الصنف', f: (i) => esc(i.arabic || i.name) }, { h: 'تشغيلة', f: (i) => i.batch_id || '' }, { h: 'المباع', n: 1, f: (i) => qtyf(i.qty) }, { h: 'سبق إرجاعه', n: 1, f: (i) => qtyf(i.returned_qty) }, { h: 'كمية المرتجع (علب)', f: (i) => `<input data-rq="${i.id}" value="0" style="width:80px" ${i.qty - i.returned_qty <= 0 ? 'disabled' : ''}>` }, { h: 'قيمة العلبة', n: 1, f: (i) => money(i.total / i.qty) }], items) +
     `<div class="row mt"><div class="field"><label>طريقة رد المبلغ</label><select id="r_m"><option value="cash">كاش من الدرج</option><option value="card">رد على الفيزا (مش من الدرج)</option>${s.customer_id ? '<option value="balance">خصم من حساب العميل</option>' : ''}</select></div><span class="grow"></span><div><span class="mute">قيمة المرتجع</span><div id="r_t" style="font-size:26px;font-weight:800;color:var(--danger)">0.00</div></div></div>`,
     { wide: true, footer: '<button class="btn danger" id="r_ok">تأكيد المرتجع</button>' });
+  if (s.credit > 0 && s.customer_id) $('#r_m', m).value = 'balance'; // credit sale: default refund goes back to the customer's account
   const factor = s.subtotal > 0 ? s.total / s.subtotal : 1; // invoice-level discount shares into each item's refund
   const calc = () => { let t = 0; $$('[data-rq]', m).forEach((i) => { const it = items.find((x) => x.id == i.dataset.rq); const q = Math.min(num(i.value), it.qty - it.returned_qty); t += (it.total / it.qty) * q * factor; }); $('#r_t', m).textContent = money(t); return t; };
   m.addEventListener('input', (e) => e.target.dataset.rq && calc());
@@ -25,7 +26,8 @@ async function openReturn(saleId) {
       const it = items.find((x) => x.id == i.dataset.rq); const q = Math.min(num(i.value), r2((it.qty - it.returned_qty) * 1000) / 1000); if (q <= 0) continue;
       total += (it.total / it.qty) * q * factor; cost += it.cost * q;
       ops.push({ sql: 'UPDATE sale_items SET returned_qty=returned_qty+? WHERE id=?', params: [q, it.id] });
-      if (it.batch_id) ops.push({ sql: 'UPDATE batches SET qty=qty+? WHERE id=?', params: [q, it.batch_id] });
+      if (it.batch_id && (await Q1('SELECT id FROM batches WHERE id=?', [it.batch_id]))) ops.push({ sql: 'UPDATE batches SET qty=qty+? WHERE id=?', params: [q, it.batch_id] });
+      else ops.push({ sql: "INSERT INTO batches(drug_id,batch_no,expiry,qty,cost,created_at) VALUES(?,'',NULL,?,?,?)", params: [it.drug_id, q, it.cost || 0, nowISO()] }); // original batch was deleted: keep the returned stock
     }
     total = r2(total); if (total <= 0) return toast('حدد كمية المرتجع', 'err');
     ops.push({ sql: 'UPDATE sale_returns SET total=?, cost_total=? WHERE id=?', params: [total, r2(cost), '@0'] });

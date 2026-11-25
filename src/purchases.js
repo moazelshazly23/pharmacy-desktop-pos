@@ -16,7 +16,7 @@ ACT['pur-new'] = async () => {
   const m = modal('فاتورة شراء جديدة', `<div class="grid g3 mb"><div class="field"><label>المورد</label><select id="p_s"><option value="">— بدون مورد —</option>${sups.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
     <div class="field"><label>رقم فاتورة المورد</label><input id="p_n"></div><div class="field"><label>التاريخ</label><input id="p_d" type="date" value="${today()}"></div></div>
     <div class="searchbar mb"><span class="si">🔍</span><input id="p_q" placeholder="ابحث عن صنف أو امسح الباركود لإضافته" autocomplete="off"><div class="results" id="p_r" hidden></div></div>
-    <div id="p_l"></div><div class="row mt"><div class="field"><label>المدفوع للمورد الآن</label><input id="p_paid" value="0" style="width:140px"></div><span class="grow"></span><div style="text-align:left"><span class="mute">إجمالي الفاتورة</span><div style="font-size:28px;font-weight:800;color:var(--pri)" id="p_t">0.00</div></div></div><div class="err" id="p_e"></div>`,
+    <div id="p_l"></div><div class="row mt"><div class="field"><label>المدفوع للمورد الآن</label><input id="p_paid" value="0" style="width:140px"></div><label class="row small" style="margin-top:22px"><input type="checkbox" id="p_dr"> المدفوع طلع من درج الكاش (يتخصم من جرد الوردية)</label><span class="grow"></span><div style="text-align:left"><span class="mute">إجمالي الفاتورة</span><div style="font-size:28px;font-weight:800;color:var(--pri)" id="p_t">0.00</div></div></div><div class="err" id="p_e"></div>`,
     { wide: true, sticky: true, footer: '<button class="btn lg" id="p_ok">💾 حفظ الفاتورة وإضافة للمخزون</button><button class="btn sec" id="p_no">إلغاء</button>' });
   const renderLines = () => {
     $('#p_l', m).innerHTML = PUR.lines.length ? `<div class="tw"><table><thead><tr><th>الصنف</th><th>التشغيلة</th><th>الصلاحية (2027-03)</th><th>الكمية</th><th>التكلفة</th><th>سعر البيع</th><th class="n">الإجمالي</th><th></th></tr></thead><tbody>${PUR.lines.map((l, i) => `<tr><td><b>${esc(l.name)}</b></td>
@@ -44,6 +44,7 @@ ACT['pur-new'] = async () => {
       ops.push({ sql: 'INSERT INTO purchase_items(purchase_id,drug_id,batch_id,batch_no,expiry,qty,cost,price) VALUES(?,?,?,?,?,?,?,?)', params: ['@0', l.id, '@last', l.batch, ex, l.qty, l.cost, l.price] });
       ops.push({ sql: 'UPDATE drugs SET cost=?, price=CASE WHEN ?>0 THEN ? ELSE price END WHERE id=?', params: [l.cost, l.price, l.price, l.id] });
     }
+    if ($('#p_dr', m).checked && paid > 0) ops.push({ sql: "INSERT INTO payments(date,party_type,party_id,amount,user_id,shift_id,note) VALUES(?,'supplier',?,?,?,?,?)", params: [nowISO(), sid ? +sid : 0, paid, App.user.id, App.shift?.id || null, 'سداد فاتورة شراء من الدرج'] });
     if (sid && total - paid > 0) ops.push({ sql: 'UPDATE suppliers SET balance=balance+? WHERE id=?', params: [r2(total - paid), sid] });
     await api.tx(ops); m.close(); toast('تم حفظ فاتورة الشراء وتحديث المخزون', 'ok'); go('purchases');
   };

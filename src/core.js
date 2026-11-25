@@ -173,7 +173,7 @@ function forceChangePin() {
     };
   });
 }
-function logout() { App.user = null; App.shift = null; renderLogin(); }
+function logout() { if (typeof POS !== 'undefined') { POS.cart = []; POS.customer = null; POS.discVal = 0; POS.discType = 'fixed'; } App.user = null; App.shift = null; renderLogin(); }
 ACT.logout = logout;
 
 // ---------- shell / router ----------
