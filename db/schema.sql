@@ -60,3 +60,5 @@ CREATE TABLE IF NOT EXISTS expenses (
 CREATE TABLE IF NOT EXISTS stock_adjustments (
   id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, drug_id INTEGER, batch_id INTEGER, old_qty REAL, new_qty REAL, reason TEXT, user_id INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, user_id INTEGER, user_name TEXT, action TEXT, detail TEXT);

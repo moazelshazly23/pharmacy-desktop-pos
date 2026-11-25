@@ -32,6 +32,6 @@ async function openReturn(saleId) {
     total = r2(total); if (total <= 0) return toast('حدد كمية المرتجع', 'err');
     ops.push({ sql: 'UPDATE sale_returns SET total=?, cost_total=? WHERE id=?', params: [total, r2(cost), '@0'] });
     if ($('#r_m', m).value === 'balance' && s.customer_id) ops.push({ sql: 'UPDATE customers SET balance=balance-? WHERE id=?', params: [total, s.customer_id] });
-    await api.tx(ops); m.close(); toast(`تم المرتجع بقيمة ${money(total)}`, 'ok'); go('returns');
+    await api.tx(ops); await audit('مرتجع', `فاتورة #${saleId} بقيمة ${money(total)} (${$('#r_m', m).value})`); m.close(); toast(`تم المرتجع بقيمة ${money(total)}`, 'ok'); go('returns');
   };
 }

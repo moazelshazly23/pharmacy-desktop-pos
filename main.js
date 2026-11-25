@@ -69,6 +69,7 @@ async function openDb() {
 function migrate() {
   const has = (t, c) => all(`PRAGMA table_info(${t})`).some((r) => r.name === c);
   const add = (t, c, def) => { if (!has(t, c)) db.run(`ALTER TABLE ${t} ADD COLUMN ${c} ${def}`); };
+  add('users', 'failed_count', 'INTEGER NOT NULL DEFAULT 0'); add('users', 'locked_until', 'INTEGER NOT NULL DEFAULT 0');
   scheduleSave(true);
 }
 
@@ -108,7 +109,7 @@ ipcMain.handle('app:restore', async () => {
   test.close();
   flush(); fs.copyFileSync(dbFile, dbFile + '.before-restore');
   db.close(); db = new SQL.Database(buf); dirty = true; flush();
-  db.run(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8'));
+  db.run(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8')); migrate();
   return { ok: true };
 });
 ipcMain.handle('app:info', () => ({ version: app.getVersion(), dbFile, backups: path.join(app.getPath('userData'), 'backups') }));

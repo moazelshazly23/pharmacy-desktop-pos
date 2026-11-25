@@ -27,7 +27,7 @@ Views.cash = async (el) => {
 ACT['shift-open'] = async () => {
   const v = await promptBox('فتح وردية', 'رصيد الدرج الافتتاحي (كاش)', '0', 'number'); if (v === null) return;
   const r = await X('INSERT INTO shifts(user_id,opened_at,opening_cash) VALUES(?,?,?)', [App.user.id, nowISO(), num(v)]);
-  await currentShift(); toast('تم فتح الوردية', 'ok'); go('cash');
+  await currentShift(); await audit('فتح وردية', `رصيد ${money(num(v))}`); toast('تم فتح الوردية', 'ok'); go('cash');
 };
 ACT['shift-close'] = async () => {
   const t = await shiftSummary(App.shift);
@@ -36,7 +36,7 @@ ACT['shift-close'] = async () => {
   $('#cok', m).onclick = async () => {
     if ($('#cc', m).value.trim() === '') return toast('اكتب الكاش الفعلي', 'err');
     await X('UPDATE shifts SET closed_at=?, expected_cash=?, counted_cash=?, note=? WHERE id=?', [nowISO(), t.expected, num($('#cc', m).value), $('#cn', m).value, App.shift.id]);
-    App.shift = null; m.close(); toast('تم إقفال الوردية', 'ok'); go('cash');
+    await audit('إقفال وردية', `متوقع ${money(t.expected)} فعلي ${money(num($('#cc', m).value))}`); App.shift = null; m.close(); toast('تم إقفال الوردية', 'ok'); go('cash');
   };
 };
 ACT['exp-new'] = async () => {
@@ -44,6 +44,6 @@ ACT['exp-new'] = async () => {
   $('#eok', m).onclick = async () => {
     const a = num($('#ea', m).value); if (a <= 0) return toast('اكتب المبلغ', 'err');
     await X('INSERT INTO expenses(date,category,amount,note,user_id,shift_id) VALUES(?,?,?,?,?,?)', [nowISO(), $('#ec', m).value, a, $('#en', m).value, App.user.id, App.shift?.id || null]);
-    m.close(); go('cash');
+    await audit('مصروف', `${$('#ec', m).value} ${money(a)}`); m.close(); go('cash');
   };
 };

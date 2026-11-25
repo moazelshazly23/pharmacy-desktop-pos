@@ -14,7 +14,28 @@ const fdate = (s) => (s ? String(s).slice(0, 10) : '');
 const ftime = (s) => (s ? String(s).slice(0, 16).replace('T', ' ') : '');
 const addDays = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const normAr = (s) => String(s || '').toLowerCase().replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/\s+/g, ' ').trim();
-const hashPin = (pin) => { let h = 5381; const s = 'ph1:' + pin; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(16); };
+const hashPinLegacy = (pin) => { let h = 5381; const s = 'ph1:' + pin; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(16); };
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+async function pbkdf2(pin, saltHex, iter) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+  const salt = new Uint8Array(saltHex.match(/../g).map((h) => parseInt(h, 16)));
+  return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, key, 256));
+}
+// New PINs: salted PBKDF2-SHA256. Old simple hashes are still accepted once and upgraded at login.
+async function hashPin(pin) {
+  const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+  return `pbkdf2$120000$${salt}$${await pbkdf2(pin, salt, 120000)}`;
+}
+async function verifyPin(pin, stored) {
+  stored = String(stored || '');
+  if (stored.startsWith('pbkdf2$')) { const [, it, salt, h] = stored.split('$'); return (await pbkdf2(pin, salt, +it)) === h; }
+  return stored === hashPinLegacy(pin);
+}
+const weakPin = (v) => v.length < 4 || v === '1234' || /^(\d)\1+$/.test(v) || '0123456789'.includes(v) || '9876543210'.includes(v);
+const WEAK_MSG = 'الرقم السري ضعيف: 4 أرقام على الأقل، ومش 1234 ولا أرقام متكررة أو متتالية';
+async function audit(action, detail = '') {
+  try { await api.run('INSERT INTO audit_log(ts,user_id,user_name,action,detail) VALUES(?,?,?,?,?)', [nowISO(), App.user?.id || null, App.user?.name || '', action, String(detail).slice(0, 300)]); } catch (e) { console.error('audit', e); }
+}
 const debounce = (fn, ms = 160) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const Q = (sql, p) => api.all(sql, p);
 const Q1 = async (sql, p) => (await api.all(sql, p))[0];
@@ -155,10 +176,21 @@ function renderLogin() {
     $('#lf').onsubmit = async (e) => {
       e.preventDefault();
       const u = await Q1('SELECT * FROM users WHERE id=? AND active=1', [$('#lu').value]);
-      if (!u || u.pin_hash !== hashPin($('#lp').value)) { $('#le').textContent = 'الرقم السري غلط'; $('#lp').select(); return; }
-      App.user = u; await currentShift();
+      if (!u) return;
+      const left = (u.locked_until || 0) - Date.now();
+      if (left > 0) { $('#le').textContent = `الحساب مقفول مؤقتاً بعد محاولات غلط. حاول بعد ${Math.ceil(left / 60000)} دقيقة أو اطلب من المدير فتحه`; return; }
+      if (!(await verifyPin($('#lp').value, u.pin_hash))) {
+        const f = (u.failed_count || 0) + 1, lock = f >= 5;
+        await X('UPDATE users SET failed_count=?, locked_until=? WHERE id=?', [lock ? 0 : f, lock ? Date.now() + 5 * 60000 : 0, u.id]);
+        if (lock) await X('UPDATE users SET failed_count=0 WHERE id=?', [u.id]);
+        App.user = null; await audit(lock ? 'قفل حساب' : 'دخول فاشل', u.name);
+        $('#le').textContent = lock ? 'محاولات غلط كتير. الحساب اتقفل 5 دقايق' : `الرقم السري غلط (${f} من 5)`; $('#lp').select(); return;
+      }
+      if (!String(u.pin_hash).startsWith('pbkdf2$')) { u.pin_hash = await hashPin($('#lp').value); await X('UPDATE users SET pin_hash=? WHERE id=?', [u.pin_hash, u.id]); }
+      await X('UPDATE users SET failed_count=0, locked_until=0 WHERE id=?', [u.id]);
+      App.user = u; await currentShift(); await audit('دخول', u.name);
       if (u.must_change) await forceChangePin();
-      renderShell(); go(can('pos') ? 'pos' : 'items');
+      renderShell(); startIdleLock(); go(can('pos') ? 'pos' : 'items');
     };
   });
 }
@@ -167,13 +199,14 @@ function forceChangePin() {
     const m = modal('غيّر الرقم السري', `<p class="mute">ده أول دخول بالرقم الافتراضي. اختار رقم سري جديد (4 أرقام على الأقل).</p><div class="field"><label>الرقم السري الجديد</label><input id="np" type="password" inputmode="numeric"></div><div class="err" id="ne"></div>`, { sticky: true, footer: '<button class="btn" data-ok>حفظ</button>' });
     m.querySelector('[data-ok]').onclick = async () => {
       const v = $('#np', m).value;
-      if (v.length < 4 || v === '1234') { $('#ne', m).textContent = 'اختار رقم مختلف عن 1234 ومن 4 أرقام على الأقل'; return; }
-      await X('UPDATE users SET pin_hash=?, must_change=0 WHERE id=?', [hashPin(v), App.user.id]);
+      if (weakPin(v)) { $('#ne', m).textContent = WEAK_MSG; return; }
+      await X('UPDATE users SET pin_hash=?, must_change=0 WHERE id=?', [await hashPin(v), App.user.id]); await audit('تغيير الرقم السري', App.user.name);
       App.user.must_change = 0; m.remove(); toast('تم تغيير الرقم السري', 'ok'); res();
     };
   });
 }
-function logout() { if (typeof POS !== 'undefined') { POS.cart = []; POS.customer = null; POS.discVal = 0; POS.discType = 'fixed'; } App.user = null; App.shift = null; renderLogin(); }
+function logout() { clearInterval(idleT); document.querySelector('.lockov')?.remove(); if (App.user) audit('خروج', App.user.name);
+  if (typeof POS !== 'undefined') { POS.cart = []; POS.customer = null; POS.discVal = 0; POS.discType = 'fixed'; } App.user = null; App.shift = null; renderLogin(); }
 ACT.logout = logout;
 
 // ---------- shell / router ----------
@@ -222,3 +255,27 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'F2') { e.preventDefault(); go('pos'); }
   if (e.key === 'F3') { e.preventDefault(); go('items'); }
 });
+
+// ---------- auto-lock after idle ----------
+let idleT = null, lastAct = Date.now();
+['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach((ev) => document.addEventListener(ev, () => { lastAct = Date.now(); }, true));
+function startIdleLock() {
+  clearInterval(idleT);
+  idleT = setInterval(() => {
+    const mins = num(App.settings.idle_lock ?? 10);
+    if (!App.user || !mins || document.querySelector('.lockov') || Date.now() - lastAct < mins * 60000) return;
+    lockScreen();
+  }, 15000);
+}
+function lockScreen() {
+  const ov = document.createElement('div'); ov.className = 'ov lockov'; ov.style.zIndex = 9999; ov.style.background = 'var(--bg, #f4f6f8)';
+  ov.innerHTML = `<form class="login" style="width:100%"><div class="box"><div class="logo">🔒</div><h2>الشاشة مقفولة</h2><p>${esc(App.user.name)} - اكتب الرقم السري للمتابعة (السلة والفاتورة محفوظة)</p><div class="field"><input id="lkp" type="password" inputmode="numeric" autofocus></div><div class="err" id="lke"></div><button class="btn lg" style="width:100%">فتح</button><button type="button" class="btn sec" style="width:100%;margin-top:8px" id="lko">تسجيل خروج</button></div></form>`;
+  document.body.appendChild(ov);
+  setTimeout(() => $('#lkp', ov).focus(), 30);
+  $('#lko', ov).onclick = () => logout();
+  ov.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault();
+    const u = await Q1('SELECT pin_hash FROM users WHERE id=?', [App.user.id]);
+    if (await verifyPin($('#lkp', ov).value, u.pin_hash)) { ov.remove(); lastAct = Date.now(); } else { $('#lke', ov).textContent = 'الرقم السري غلط'; $('#lkp', ov).select(); }
+  };
+}

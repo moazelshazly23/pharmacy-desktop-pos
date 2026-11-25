@@ -263,7 +263,7 @@ async function printReceipt(saleId) {
    <div style="display:flex;justify-content:space-between"><span>الإجمالي</span><span>${money(s.subtotal)}</span></div>
    ${s.discount ? `<div style="display:flex;justify-content:space-between"><span>الخصم</span><span>${money(s.discount)}</span></div>` : ''}
    <div style="display:flex;justify-content:space-between;font-size:15px"><b>الصافي</b><b>${money(s.total)} ${cur()}</b></div>
-   ${s.credit ? `<div>آجل: ${money(s.credit)}</div>` : ''}<hr><div class="c">${esc(S.receipt_footer || '')}</div>`;
+   ${s.cash ? `<div>كاش: ${money(s.cash)}</div>` : ''}${s.card ? `<div>فيزا: ${money(s.card)}</div>` : ''}${s.credit ? `<div>آجل: ${money(s.credit)}</div>` : ''}<hr><div class="c">${esc(S.receipt_footer || '')}</div>`;
   await api.print();
 }
 ACT['reprint'] = (el) => printReceipt(+el.dataset.id);
