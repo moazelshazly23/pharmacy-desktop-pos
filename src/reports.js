@@ -3,6 +3,7 @@ const RP = { from: null, to: null, tab: 'sum' };
 Views.reports = async (el) => {
   el.style.padding = '18px 22px';
   RP.from = RP.from || today(); RP.to = RP.to || today();
+  if (RP.from > RP.to) [RP.from, RP.to] = [RP.to, RP.from];
   const f = RP.from + 'T00:00:00', t = RP.to + 'T23:59:59';
   const preset = (a, b) => `data-act="rp-range" data-a="${a}" data-b="${b}"`;
   const d = today(), mStart = d.slice(0, 8) + '01';
@@ -20,7 +21,7 @@ Views.reports = async (el) => {
      <div class="stat"><div class="l">تكلفة البضاعة المباعة</div><div class="v">${money(S.cost - R.cost)}</div></div><div class="stat g"><div class="l">مجمل الربح</div><div class="v">${money(gross)}</div></div><div class="stat r"><div class="l">المصروفات</div><div class="v">${money(E.t)}</div></div><div class="stat g"><div class="l">صافي الربح</div><div class="v">${money(netp)}</div></div></div>
      <div class="card"><b>طرق الدفع</b><div class="grid g3 mt"><div class="stat"><div class="l">كاش</div><div class="v">${money(S.cash)}</div></div><div class="stat"><div class="l">فيزا</div><div class="v">${money(S.card)}</div></div><div class="stat"><div class="l">آجل</div><div class="v">${money(S.credit)}</div></div></div></div><div class="small mute mt">الربح محسوب على تكلفة الشراء المسجلة في التشغيلات. الأصناف المباعة بدون تكلفة مسجلة بتتحسب بتكلفة صفر.</div>`;
   } else if (RP.tab === 'items') {
-    const rows = await Q('SELECT d.arabic, d.name, SUM(si.qty - si.returned_qty) q, SUM(si.total * (si.qty - si.returned_qty) / si.qty) rev, SUM(si.total * (si.qty - si.returned_qty) / si.qty - si.cost * (si.qty - si.returned_qty)) profit FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN drugs d ON d.id=si.drug_id WHERE s.date BETWEEN ? AND ? GROUP BY si.drug_id ORDER BY q DESC LIMIT 100', [f, t]);
+    const rows = await Q('SELECT d.arabic, d.name, SUM(si.qty - si.returned_qty) q, SUM(si.total * (si.qty - si.returned_qty) / si.qty * (CASE WHEN s.subtotal > 0 THEN s.total / s.subtotal ELSE 1 END)) rev, SUM(si.total * (si.qty - si.returned_qty) / si.qty * (CASE WHEN s.subtotal > 0 THEN s.total / s.subtotal ELSE 1 END) - si.cost * (si.qty - si.returned_qty)) profit FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN drugs d ON d.id=si.drug_id WHERE s.date BETWEEN ? AND ? GROUP BY si.drug_id ORDER BY q DESC LIMIT 100', [f, t]);
     body.innerHTML = `<div class="row mb"><span class="grow"></span><button class="btn sec" data-act="rp-csv-items">⬇ تصدير</button></div>` + table([{ h: 'الصنف', f: (r) => esc(r.arabic || r.name) }, { h: 'الكمية (علب)', n: 1, f: (r) => qtyf(r.q) }, { h: 'الإيراد', n: 1, f: (r) => money(r.rev) }, { h: 'الربح', n: 1, f: (r) => money(r.profit) }], rows, { empty: 'لا توجد مبيعات في الفترة' }); Views._ri = rows;
   } else if (RP.tab === 'users') {
     const rows = await Q('SELECT u.name, COUNT(*) n, SUM(s.total) total, SUM(s.discount) disc FROM sales s LEFT JOIN users u ON u.id=s.user_id WHERE s.date BETWEEN ? AND ? GROUP BY s.user_id ORDER BY total DESC', [f, t]);

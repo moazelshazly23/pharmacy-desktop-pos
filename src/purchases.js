@@ -35,8 +35,13 @@ ACT['pur-new'] = async () => {
   $('#p_no', m).onclick = () => m.close();
   $('#p_ok', m).onclick = async () => {
     if (!PUR.lines.length) return ($('#p_e', m).textContent = 'أضف صنف واحد على الأقل');
-    for (const l of PUR.lines) { if (l.qty <= 0) return ($('#p_e', m).textContent = 'الكمية لازم تكون أكبر من صفر: ' + l.name); if (l.exp && !monthToDate(l.exp)) return ($('#p_e', m).textContent = 'صيغة الصلاحية غلط في: ' + l.name); }
+    for (const l of PUR.lines) { if (l.cost < 0 || l.price < 0) return ($('#p_e', m).textContent = 'التكلفة أو السعر بالسالب في: ' + l.name); if (l.qty <= 0) return ($('#p_e', m).textContent = 'الكمية لازم تكون أكبر من صفر: ' + l.name); if (l.exp && !monthToDate(l.exp)) return ($('#p_e', m).textContent = 'صيغة الصلاحية غلط في: ' + l.name); }
     const total = r2(PUR.lines.reduce((s, l) => s + l.qty * l.cost, 0)), paid = Math.max(0, Math.min(total, num($('#p_paid', m).value))), sid = $('#p_s', m).value || null;
+    if ($('#p_ok', m).disabled) return;
+    const invNo = $('#p_n', m).value.trim();
+    if (invNo && sid) { const dup = await Q1('SELECT id FROM purchases WHERE supplier_id=? AND invoice_no=?', [sid, invNo]); if (dup && !(await confirmBox(`رقم فاتورة المورد ${esc(invNo)} اتسجل قبل كده (فاتورة #${dup.id}). تحفظها برضه؟`, 'حفظ'))) return; }
+    $('#p_ok', m).disabled = true;
+    try {
     const ops = [{ sql: 'INSERT INTO purchases(supplier_id,date,invoice_no,total,paid,user_id) VALUES(?,?,?,?,?,?)', params: [sid, $('#p_d', m).value || today(), $('#p_n', m).value.trim(), total, paid, App.user.id] }];
     for (const l of PUR.lines) {
       const ex = monthToDate(l.exp);
@@ -46,6 +51,7 @@ ACT['pur-new'] = async () => {
     }
     if ($('#p_dr', m).checked && paid > 0) ops.push({ sql: "INSERT INTO payments(date,party_type,party_id,amount,user_id,shift_id,note) VALUES(?,'supplier',?,?,?,?,?)", params: [nowISO(), sid ? +sid : 0, paid, App.user.id, App.shift?.id || null, 'سداد فاتورة شراء من الدرج'] });
     if (sid && total - paid > 0) ops.push({ sql: 'UPDATE suppliers SET balance=balance+? WHERE id=?', params: [r2(total - paid), sid] });
-    await api.tx(ops); m.close(); toast('تم حفظ فاتورة الشراء وتحديث المخزون', 'ok'); go('purchases');
+    const pid = (await api.tx(ops))[0]; await audit('فاتورة شراء', `#${pid} بقيمة ${money(total)} مدفوع ${money(paid)}`); m.close(); toast('تم حفظ فاتورة الشراء وتحديث المخزون', 'ok'); go('purchases');
+    } catch (e) { $('#p_ok', m).disabled = false; throw e; }
   };
 };

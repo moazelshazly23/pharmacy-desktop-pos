@@ -3,7 +3,12 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const num = (v) => { const n = parseFloat(String(v ?? '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(',', '.')); return isNaN(n) ? 0 : n; };
+const num = (v) => {
+  let s = String(v ?? '').trim().replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/٫/g, '.').replace(/٬/g, ',');
+  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g, ''); // 1,500 means one thousand five hundred
+  else s = s.replace(',', '.');
+  const n = parseFloat(s); return isFinite(n) ? n : 0;
+};
 const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const money = (n) => r2(num(n)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qtyf = (n) => { n = r2(num(n)); return Number.isInteger(n) ? String(n) : String(+n.toFixed(2)); };
@@ -116,7 +121,7 @@ function table(cols, rows, opts = {}) {
     .map((r) => `<tr ${r._attr || ''}>${cols.map((c) => `<td class="${c.n ? 'n' : ''}">${typeof c.f === 'function' ? c.f(r) : esc(r[c.f])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 function downloadCSV(name, header, rows) {
-  const csv = '\uFEFF' + [header, ...rows].map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const csv = '\uFEFF' + [header, ...rows].map((r) => r.map((v) => { let t = String(v ?? ''); if (/^[=+@\t\r]/.test(t) || (/^-/.test(t) && isNaN(Number(t)))) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; }).join(',')).join('\r\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name; a.click();
 }
 function expiryBadge(exp) {
@@ -206,9 +211,19 @@ function forceChangePin() {
     };
   });
 }
-function logout() { clearInterval(idleT); document.querySelector('.lockov')?.remove(); if (App.user) audit('خروج', App.user.name);
+function logout() { clearInterval(idleT); $$('.ov').forEach((o) => o.remove()); $('#receipt') && ($('#receipt').innerHTML = ''); if (App.user) audit('خروج', App.user.name);
   if (typeof POS !== 'undefined') { POS.cart = []; POS.customer = null; POS.discVal = 0; POS.discType = 'fixed'; } App.user = null; App.shift = null; renderLogin(); }
 ACT.logout = logout;
+ACT['pin-change'] = () => {
+  const m = modal('تغيير الرقم السري', `<div class="field"><label>الرقم السري الحالي</label><input id="pc_o" type="password" inputmode="numeric"></div><div class="field"><label>الرقم السري الجديد</label><input id="pc_n" type="password" inputmode="numeric"></div><div class="err" id="pc_e"></div>`, { footer: '<button class="btn" id="pc_ok">حفظ</button>' });
+  $('#pc_ok', m).onclick = async () => {
+    const u = await Q1('SELECT pin_hash FROM users WHERE id=?', [App.user.id]), n = $('#pc_n', m).value;
+    if (!(await verifyPin($('#pc_o', m).value, u.pin_hash))) { $('#pc_e', m).textContent = 'الرقم السري الحالي غلط'; return; }
+    if (weakPin(n)) { $('#pc_e', m).textContent = WEAK_MSG; return; }
+    await X('UPDATE users SET pin_hash=?, must_change=0 WHERE id=?', [await hashPin(n), App.user.id]); await audit('تغيير الرقم السري', App.user.name);
+    m.close(); toast('تم تغيير الرقم السري', 'ok');
+  };
+};
 
 // ---------- shell / router ----------
 let clockT;
@@ -217,7 +232,7 @@ function renderShell() {
   $('#app').innerHTML = `<div class="shell"><aside class="side">
     <div class="brand"><div class="logo">⚕️</div><div>${esc(App.settings.pharmacy_name || 'الصيدلية')}<small>نظام إدارة الصيدلية</small></div></div>
     <nav class="nav">${nav}</nav>
-    <div class="userbox"><div><b>${esc(App.user.name)}</b><span class="small">${ROLE_NAMES[App.user.role]}</span></div><button data-act="logout">خروج</button></div></aside>
+    <div class="userbox"><div><b>${esc(App.user.name)}</b><span class="small">${ROLE_NAMES[App.user.role]}</span></div><button data-act="pin-change" title="تغيير الرقم السري">🔑</button><button data-act="logout">خروج</button></div></aside>
     <section class="main"><div class="top"><h1 id="ttl"></h1><span class="sp"></span><span id="shiftpill" class="pill gray"></span><span class="clock" id="clock"></span></div><div class="view" id="view"></div></section></div>`;
   clearInterval(clockT);
   const tick = () => { const c = $('#clock'); if (c) c.textContent = new Date().toLocaleString('ar-EG', { weekday: 'long', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long' }); };
@@ -281,7 +296,9 @@ function lockScreen() {
     const u = await Q1('SELECT pin_hash FROM users WHERE id=?', [App.user.id]);
     if (await verifyPin($('#lkp', ov).value, u.pin_hash)) { ov.remove(); lastAct = Date.now(); lockFails = 0; return; }
     lockFails++;
-    if (lockFails >= 5) { ov.remove(); logout(); return; } // no unlimited guessing: after 5 wrong tries the full login (with lockout) applies
+    await audit('دخول فاشل (شاشة القفل)', App.user.name);
+    const f = (App.user.failed_count || 0) + lockFails;
+    if (lockFails >= 5) { await X('UPDATE users SET locked_until=? WHERE id=?', [Date.now() + 5 * 60000, App.user.id]); await audit('قفل حساب', App.user.name); ov.remove(); logout(); return; } // no unlimited guessing: after 5 wrong tries the full login (with lockout) applies
     $('#lke', ov).textContent = `الرقم السري غلط (${lockFails} من 5 وبعدها خروج)`; $('#lkp', ov).select();
   };
 }

@@ -52,7 +52,7 @@ async function openItem(id, afterClose) {
       ${d.uses ? `<div class="alert info mt"><b>دواعي الاستعمال:</b> ${esc(d.uses)}</div>` : ''}
       ${canEdit ? `<div class="row mt"><button class="btn" data-act="item-save">💾 حفظ</button></div>` : ''}</div>
      <div><div class="row mb"><b>التشغيلات والمخزون</b><span class="grow"></span>${id ? stockPill(d.stock, d.min_qty) : ''}${id && canEdit ? '<button class="btn sec sm" data-act="batch-add">+ رصيد/تشغيلة</button>' : ''}</div>
-      ${id ? table([{ h: 'رقم التشغيلة', f: (b) => esc(b.batch_no || '—') }, { h: 'الصلاحية', f: (b) => expiryBadge(b.expiry) }, { h: 'الكمية', n: 1, f: (b) => qtyf(b.qty) }, { h: 'التكلفة', n: 1, f: (b) => money(b.cost) }, { h: '', f: (b) => canEdit ? `<button class="btn sec sm" data-act="batch-adj" data-id="${b.id}">جرد/تعديل</button>` : '' }], batches, { empty: 'لا توجد تشغيلات' }) : '<div class="mute small">احفظ الصنف الأول ثم أضف رصيده.</div>'}
+      ${id ? table([{ h: 'رقم التشغيلة', f: (b) => esc(b.batch_no || '—') }, { h: 'الصلاحية', f: (b) => expiryBadge(b.expiry) }, { h: 'الكمية', n: 1, f: (b) => qtyf(b.qty) }, ...(canEdit ? [{ h: 'التكلفة', n: 1, f: (b) => money(b.cost) }] : []), { h: '', f: (b) => canEdit ? `<button class="btn sec sm" data-act="batch-adj" data-id="${b.id}">جرد/تعديل</button>` : '' }], batches, { empty: 'لا توجد تشغيلات' }) : '<div class="mute small">احفظ الصنف الأول ثم أضف رصيده.</div>'}
       <div class="mt"><b>🔁 البدائل</b></div>
       <div style="max-height:200px;overflow:auto" class="mt">${alts.length ? alts.map((a) => `<div class="res" data-act="item-open" data-id="${a.id}"><div class="grow"><div class="nm">${esc(a.arabic || a.name)}</div><div class="en">${esc(a.company || '')}</div></div>${stockPill(a.stock)}<div class="pr">${money(a.price)}</div></div>`).join('') : '<div class="mute small">لا توجد بدائل</div>'}</div></div></div>`;
     $('#f_kd', m).value = d.kind || 'drug';
@@ -65,13 +65,16 @@ async function openItem(id, afterClose) {
       e.stopPropagation();
       const v = (s) => $(s, m).value.trim();
       if (!v('#f_ar') && !v('#f_en')) return toast('اكتب اسم الصنف', 'err');
+      if (num(v('#f_pr')) < 0 || num(v('#f_mq')) < 0) return toast('السعر وحد الطلب مينفعش يكونوا بالسالب', 'err');
       const bc = v('#f_bc');
       if (bc) { const ex = await Q1('SELECT id,arabic FROM drugs WHERE barcode=? AND id<>?', [bc, d.id]); if (ex) return toast('الباركود ده مسجل على صنف تاني: ' + (ex.arabic || ''), 'err'); }
       const search = normAr([v('#f_ar'), v('#f_en'), v('#f_ac'), bc, v('#f_co')].join(' '));
       const vals = [v('#f_en'), v('#f_ar'), v('#f_ac'), v('#f_co'), num(v('#f_pr')), bc || null, Math.max(1, Math.round(num(v('#f_st')) || 1)), num(v('#f_mq')), $('#f_kd', m).value, search];
+      const oldPrice = d.price; const isNew = !id;
       if (id) await X('UPDATE drugs SET name=?,arabic=?,active=?,company=?,price=?,barcode=?,strips=?,min_qty=?,kind=?,search=? WHERE id=?', [...vals, id]);
       else { const r = await X('INSERT INTO drugs(name,arabic,active,company,price,barcode,strips,min_qty,kind,search,is_custom) VALUES(?,?,?,?,?,?,?,?,?,?,1)', vals); id = r.id; }
-      Object.assign(d, await getDrug(id)); toast('تم الحفظ', 'ok'); await render(); refreshBadges();
+      Object.assign(d, await getDrug(id)); if (isNew) await audit('صنف جديد', d.arabic || d.name); else if (Math.abs(num(oldPrice) - num(d.price)) > 0.001) await audit('تغيير سعر', `${d.arabic || d.name}: ${money(oldPrice)} ← ${money(d.price)}`);
+      toast('تم الحفظ', 'ok'); await render(); refreshBadges();
     }
     if (b.dataset.act === 'batch-add') { e.stopPropagation(); await batchForm(id, null, render); }
     if (b.dataset.act === 'batch-adj') { e.stopPropagation(); const bt = await Q1('SELECT * FROM batches WHERE id=?', [b.dataset.id]); await batchForm(id, bt, async () => { Object.assign(d, await getDrug(id)); await render(); }); }
@@ -80,9 +83,10 @@ async function openItem(id, afterClose) {
 }
 function monthToDate(v) { // "2027-03" -> last day of month; full date passes through
   v = String(v || '').trim(); if (!v) return null;
-  if (/^\d{4}-\d{2}$/.test(v)) { const [y, mo] = v.split('-').map(Number); return `${y}-${pad(mo)}-${pad(new Date(y, mo, 0).getDate())}`; }
+  if (/^\d{4}-\d{2}$/.test(v)) { const [y, mo] = v.split('-').map(Number); if (mo < 1 || mo > 12 || y < 2000 || y > 2100) return null; return `${y}-${pad(mo)}-${pad(new Date(y, mo, 0).getDate())}`; }
   const m = v.match(/^(\d{1,2})[\/\-](\d{4})$/); if (m) return monthToDate(`${m[2]}-${pad(+m[1])}`);
-  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) { const [y, mo, da] = v.split('-').map(Number); const dt = new Date(Date.UTC(y, mo - 1, da)); return y >= 2000 && y <= 2100 && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === da ? v : null; }
+  return null;
 }
 async function batchForm(drugId, b, done) {
   const m = modal(b ? 'جرد / تعديل تشغيلة' : 'إضافة رصيد افتتاحي / تشغيلة', `<div class="grid g2">
@@ -95,6 +99,8 @@ async function batchForm(drugId, b, done) {
   $('#b_ok', m).onclick = async () => {
     const ex = monthToDate($('#b_ex', m).value); if ($('#b_ex', m).value.trim() && !ex) return ($('#b_e', m).textContent = 'صيغة الصلاحية غلط، اكتبها مثل 2027-03');
     const q = num($('#b_q', m).value), c = num($('#b_c', m).value);
+    if (q < 0 || c < 0) return ($('#b_e', m).textContent = 'الكمية والتكلفة مينفعش يكونوا بالسالب');
+    if ($('#b_ok', m).disabled) return; $('#b_ok', m).disabled = true;
     if (b) {
       await api.tx([{ sql: 'UPDATE batches SET batch_no=?,expiry=?,qty=?,cost=? WHERE id=?', params: [$('#b_no', m).value.trim(), ex, q, c, b.id] },
         { sql: 'INSERT INTO stock_adjustments(date,drug_id,batch_id,old_qty,new_qty,reason,user_id) VALUES(?,?,?,?,?,?,?)', params: [nowISO(), drugId, b.id, b.qty, q, $('#b_r', m).value, App.user.id] }]);
@@ -104,7 +110,8 @@ async function batchForm(drugId, b, done) {
         { sql: 'INSERT INTO stock_adjustments(date,drug_id,batch_id,old_qty,new_qty,reason,user_id) VALUES(?,?,?,?,?,?,?)', params: [nowISO(), drugId, '@0', 0, q, 'رصيد افتتاحي', App.user.id] }]);
       if (c > 0) await X('UPDATE drugs SET cost=? WHERE id=?', [c, drugId]);
     }
+    await audit(b ? 'جرد/تعديل تشغيلة' : 'إضافة رصيد', `صنف #${drugId}${b ? ` من ${qtyf(b.qty)} إلى ${qtyf(q)}` : ` كمية ${qtyf(q)}`}`);
     m.close(); toast('تم الحفظ', 'ok'); done && done(); refreshBadges();
   };
-  if (b) $('#b_del', m).onclick = async () => { if (await confirmBox('حذف التشغيلة نهائياً؟', 'حذف', true)) { await X('DELETE FROM batches WHERE id=?', [b.id]); m.close(); done && done(); refreshBadges(); } };
+  if (b) $('#b_del', m).onclick = async () => { if (await confirmBox('حذف التشغيلة نهائياً؟', 'حذف', true)) { await X('DELETE FROM batches WHERE id=?', [b.id]); await audit('حذف تشغيلة', `صنف #${drugId} كمية ${qtyf(b.qty)}`); m.close(); done && done(); refreshBadges(); } };
 }

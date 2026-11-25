@@ -18,9 +18,11 @@ async function openReturn(saleId) {
   if (s.credit > 0 && s.customer_id) $('#r_m', m).value = 'balance'; // credit sale: default refund goes back to the customer's account
   else if (s.card > 0 && s.cash <= 0.001) $('#r_m', m).value = 'card'; // paid fully by card: default refund back to the card, not out of the drawer
   const factor = s.subtotal > 0 ? s.total / s.subtotal : 1; // invoice-level discount shares into each item's refund
-  const calc = () => { let t = 0; $$('[data-rq]', m).forEach((i) => { const it = items.find((x) => x.id == i.dataset.rq); const q = Math.min(num(i.value), it.qty - it.returned_qty); t += (it.total / it.qty) * q * factor; }); $('#r_t', m).textContent = money(t); return t; };
+  const calc = () => { let t = 0; $$('[data-rq]', m).forEach((i) => { const it = items.find((x) => x.id == i.dataset.rq); const q = Math.max(0, Math.min(num(i.value), it.qty - it.returned_qty)); t += (it.total / it.qty) * q * factor; }); $('#r_t', m).textContent = money(t); return t; };
   m.addEventListener('input', (e) => e.target.dataset.rq && calc());
   $('#r_ok', m).onclick = async () => {
+    if ($('#r_ok', m).disabled) return; $('#r_ok', m).disabled = true; // a double click must not return the same items twice
+    try {
     const ops = []; let total = 0, cost = 0;
     ops.push({ sql: 'INSERT INTO sale_returns(sale_id,date,user_id,shift_id,total,cost_total,refund) VALUES(?,?,?,?,?,?,?)', params: [saleId, nowISO(), App.user.id, App.shift?.id || null, 0, 0, $('#r_m', m).value] });
     for (const i of $$('[data-rq]', m)) {
@@ -30,9 +32,10 @@ async function openReturn(saleId) {
       if (it.batch_id && (await Q1('SELECT id FROM batches WHERE id=?', [it.batch_id]))) ops.push({ sql: 'UPDATE batches SET qty=qty+? WHERE id=?', params: [q, it.batch_id] });
       else ops.push({ sql: "INSERT INTO batches(drug_id,batch_no,expiry,qty,cost,created_at) VALUES(?,'',NULL,?,?,?)", params: [it.drug_id, q, it.cost || 0, nowISO()] }); // original batch was deleted: keep the returned stock
     }
-    total = r2(total); if (total <= 0) return toast('حدد كمية المرتجع', 'err');
+    total = r2(total); if (total <= 0) { $('#r_ok', m).disabled = false; return toast('حدد كمية المرتجع', 'err'); }
     ops.push({ sql: 'UPDATE sale_returns SET total=?, cost_total=? WHERE id=?', params: [total, r2(cost), '@0'] });
     if ($('#r_m', m).value === 'balance' && s.customer_id) ops.push({ sql: 'UPDATE customers SET balance=balance-? WHERE id=?', params: [total, s.customer_id] });
     await api.tx(ops); await audit('مرتجع', `فاتورة #${saleId} بقيمة ${money(total)} (${$('#r_m', m).value})`); m.close(); toast(`تم المرتجع بقيمة ${money(total)}`, 'ok'); go('returns');
+    } catch (e) { $('#r_ok', m).disabled = false; throw e; }
   };
 }

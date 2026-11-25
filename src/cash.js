@@ -25,7 +25,9 @@ Views.cash = async (el) => {
    <div><div class="row mb"><b style="font-size:16px">سجل الورديات</b></div>${table([{ h: '#', f: 'id' }, { h: 'الكاشير', f: (s) => esc(s.uname || '') }, { h: 'الفتح', f: (s) => ftime(s.opened_at) }, { h: 'الإقفال', f: (s) => ftime(s.closed_at) || '<span class="pill">مفتوحة</span>' }, { h: 'المتوقع', n: 1, f: (s) => (s.expected_cash == null ? '' : money(s.expected_cash)) }, { h: 'الفعلي', n: 1, f: (s) => (s.counted_cash == null ? '' : money(s.counted_cash)) }, { h: 'الفرق', n: 1, f: (s) => (s.counted_cash == null ? '' : `<span class="pill ${Math.abs(s.counted_cash - s.expected_cash) < 0.01 ? '' : 'red'}">${money(s.counted_cash - s.expected_cash)}</span>`) }], shifts, { empty: 'لا توجد ورديات' })}</div></div>`;
 };
 ACT['shift-open'] = async () => {
+  if (await currentShift()) return toast('عندك وردية مفتوحة بالفعل', 'err');
   const v = await promptBox('فتح وردية', 'رصيد الدرج الافتتاحي (كاش)', '0', 'number'); if (v === null) return;
+  if (num(v) < 0) return toast('رصيد الافتتاح مينفعش يكون بالسالب', 'err');
   const r = await X('INSERT INTO shifts(user_id,opened_at,opening_cash) VALUES(?,?,?)', [App.user.id, nowISO(), num(v)]);
   await currentShift(); await audit('فتح وردية', `رصيد ${money(num(v))}`); toast('تم فتح الوردية', 'ok'); go('cash');
 };
@@ -35,6 +37,8 @@ ACT['shift-close'] = async () => {
   $('#cc', m).oninput = () => { const d = num($('#cc', m).value) - t.expected; $('#cd', m).innerHTML = `الفرق: <span style="color:${Math.abs(d) < 0.01 ? 'var(--ok)' : 'var(--danger)'}">${money(d)}</span> ${d > 0.01 ? '(زيادة)' : d < -0.01 ? '(عجز)' : '(مظبوط)'}`; };
   $('#cok', m).onclick = async () => {
     if ($('#cc', m).value.trim() === '') return toast('اكتب الكاش الفعلي', 'err');
+    if (num($('#cc', m).value) < 0) return toast('الكاش الفعلي مينفعش يكون بالسالب', 'err');
+    if ($('#cok', m).disabled) return; $('#cok', m).disabled = true;
     await X('UPDATE shifts SET closed_at=?, expected_cash=?, counted_cash=?, note=? WHERE id=?', [nowISO(), t.expected, num($('#cc', m).value), $('#cn', m).value, App.shift.id]);
     await audit('إقفال وردية', `متوقع ${money(t.expected)} فعلي ${money(num($('#cc', m).value))}`); App.shift = null; m.close(); toast('تم إقفال الوردية', 'ok'); go('cash');
   };
@@ -43,6 +47,7 @@ ACT['exp-new'] = async () => {
   const m = modal('مصروف جديد', `<div class="grid g2"><div class="field"><label>البند</label><input id="ec" list="cats" placeholder="إيجار، كهرباء، مرتبات..."><datalist id="cats"><option>إيجار</option><option>كهرباء ومياه</option><option>مرتبات</option><option>نظافة</option><option>مستلزمات</option><option>أخرى</option></datalist></div><div class="field"><label>المبلغ</label><input id="ea" inputmode="decimal"></div><div class="field" style="grid-column:1/3"><label>ملاحظة</label><input id="en"></div></div>`, { footer: '<button class="btn" id="eok">حفظ</button>' });
   $('#eok', m).onclick = async () => {
     const a = num($('#ea', m).value); if (a <= 0) return toast('اكتب المبلغ', 'err');
+    if ($('#eok', m).disabled) return; $('#eok', m).disabled = true;
     await X('INSERT INTO expenses(date,category,amount,note,user_id,shift_id) VALUES(?,?,?,?,?,?)', [nowISO(), $('#ec', m).value, a, $('#en', m).value, App.user.id, App.shift?.id || null]);
     await audit('مصروف', `${$('#ec', m).value} ${money(a)}`); m.close(); go('cash');
   };

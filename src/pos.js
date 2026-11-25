@@ -26,7 +26,7 @@ Views.pos = async (el) => {
   const doSearch = debounce(async () => {
     const v = q.value.trim();
     if (!v) { hideRes(); return; }
-    POS.results = await searchDrugs(v, { limit: 30 }); POS.sel = 0; showRes();
+    POS.resultsFor = v; POS.results = await searchDrugs(v, { limit: 30 }); POS.sel = 0; showRes();
   }, 140);
   q.addEventListener('input', doSearch);
   q.addEventListener('keydown', async (e) => {
@@ -45,7 +45,7 @@ Views.pos = async (el) => {
         else await unknownBarcode(v);
         return;
       }
-      if (!POS.results.length) POS.results = await searchDrugs(v, { limit: 30 });
+      if (POS.resultsFor !== v || !POS.results.length) { POS.results = await searchDrugs(v, { limit: 30 }); POS.resultsFor = v; POS.sel = 0; } // never add a result of an older, half-typed search
       const d = POS.results[POS.sel]; if (d) { await addToCart(d); q.value = ''; hideRes(); }
     }
   });
@@ -139,7 +139,7 @@ document.addEventListener('change', (e) => {
   const l = POS.cart[+e.target.dataset.i]; if (!l) return;
   if (c === 'n') l.n = Math.max(0.01, num(e.target.value) || 1);
   if (c === 'unit') l.unit = e.target.value;
-  if (c === 'disc') l.disc = Math.max(0, num(e.target.value));
+  if (c === 'disc') l.disc = Math.min(Math.max(0, num(e.target.value)), lineGross(l));
   if (c === 'price') { const v = num(e.target.value); l.price = l.unit === 'strip' ? v * l.strips : v; }
   renderCart();
 });
@@ -157,7 +157,7 @@ ACT['pos-held'] = () => {
   const m = modal('الفواتير المعلقة', App.held.map((h, i) => `<div class="res"><div class="grow"><b>${h.cart.length} صنف</b> <span class="mute small">${ftime(h.t)}${h.customer ? ' · ' + esc(h.customer.name) : ''}</span></div><button class="btn sm" data-i="${i}" data-a="open">فتح</button><button class="btn danger sm" data-i="${i}" data-a="del">حذف</button></div>`).join(''));
   m.onclick = (e) => {
     const b = e.target.closest('button[data-i]'); if (!b) return; const i = +b.dataset.i;
-    if (b.dataset.a === 'open') { const h = App.held.splice(i, 1)[0]; Object.assign(POS, { cart: h.cart, customer: h.customer, discType: h.discType, discVal: h.discVal }); }
+    if (b.dataset.a === 'open') { const h = App.held.splice(i, 1)[0]; if (POS.cart.length) App.held.push({ t: nowISO(), cart: POS.cart, customer: POS.customer, discType: POS.discType, discVal: POS.discVal }); /* current invoice is parked, not lost */ Object.assign(POS, { cart: h.cart, customer: h.customer, discType: h.discType, discVal: h.discVal }); }
     else App.held.splice(i, 1);
     localStorage.setItem('held', JSON.stringify(App.held)); m.close(); renderCart();
   };
@@ -203,12 +203,19 @@ ACT['pos-pay'] = async () => {
     else if (mode === 'credit') { const adv = num($('#cash2', m).value); if (adv < 0) { $('#pe', m).textContent = 'مينفعش مبلغ بالسالب'; return; } cash = Math.min(total, adv); credit = r2(total - cash); }
     else { cash = num($('#mc', m).value); card = num($('#mv', m).value); credit = num($('#mr', m).value); if (cash < 0 || card < 0 || credit < 0) { $('#pe', m).textContent = 'مينفعش مبلغ بالسالب'; return; } if (Math.abs(cash + card + credit - total) > 0.01) { $('#pe', m).textContent = `مجموع الدفع (${money(cash + card + credit)}) لا يساوي المطلوب`; return; } }
     if (credit > 0 && !POS.customer) { $('#pe', m).textContent = 'اختار عميل للبيع الآجل'; return; }
+    const cap = num(App.settings.cashier_max_disc);
+    if (cap > 0 && App.user.role === 'cashier') { const gross = POS.cart.reduce((s, l) => s + lineGross(l), 0), given = gross - total; if (gross > 0 && (given / gross) * 100 > cap + 0.001) { $('#pe', m).textContent = `الخصم أكبر من المسموح للكاشير (${cap}%). اطلب من الصيدلي أو المدير`; return; } }
+    if (credit > 0) {
+      const cu = await Q1('SELECT balance, credit_limit FROM customers WHERE id=?', [POS.customer.id]);
+      if (cu && cu.credit_limit > 0 && cu.balance + credit > cu.credit_limit + 0.001) { $('#pe', m).textContent = `البيع الآجل هيعدي حد الائتمان للعميل (${money(cu.credit_limit)}). المديونية الحالية ${money(cu.balance)}`; return; }
+    }
     $('#pok', m).disabled = true;
     try {
       const id = await saveSale({ cash, card, credit, delivery: $('#pdel', m).checked ? 1 : 0 });
       const tendered = mode === 'cash' ? num($('#tend', m).value) : 0;
-      m.close(); toast(`تم حفظ الفاتورة رقم ${id}${tendered > total ? ' · الباقي ' + money(tendered - total) : ''}`, 'ok');
-      await printReceipt(id); resetPos();
+      await audit('فاتورة بيع', `#${id} بقيمة ${money(total)}${POS.cart.some((l) => num(l.disc) > 0) || cartDisc() > 0 ? ' (بخصم)' : ''}`);
+      m.close(); resetPos(); toast(`تم حفظ الفاتورة رقم ${id}${tendered > total ? ' · الباقي ' + money(tendered - total) : ''}`, 'ok');
+      try { await printReceipt(id); } catch (pe) { console.error(pe); toast('الفاتورة اتحفظت لكن الطباعة فشلت. اعمل إعادة طباعة من شاشة المرتجعات', 'err'); }
     } catch (e) { console.error(e); $('#pe', m).textContent = e.message; $('#pok', m).disabled = false; }
   };
 };
