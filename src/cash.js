@@ -40,7 +40,8 @@ ACT['shift-close'] = async () => {
     if (num($('#cc', m).value) < 0) return toast('الكاش الفعلي مينفعش يكون بالسالب', 'err');
     if ($('#cok', m).disabled) return; $('#cok', m).disabled = true;
     await X('UPDATE shifts SET closed_at=?, expected_cash=?, counted_cash=?, note=? WHERE id=?', [nowISO(), t.expected, num($('#cc', m).value), $('#cn', m).value, App.shift.id]);
-    await audit('إقفال وردية', `متوقع ${money(t.expected)} فعلي ${money(num($('#cc', m).value))}`); App.shift = null; m.close(); toast('تم إقفال الوردية', 'ok'); go('cash');
+    await audit('إقفال وردية', `متوقع ${money(t.expected)} فعلي ${money(num($('#cc', m).value))}`); const sh = App.shift, cnt = num($('#cc', m).value); App.shift = null; m.close(); toast('تم إقفال الوردية', 'ok'); go('cash');
+    if (await confirmBox('تطبع تقرير الوردية؟', 'طباعة')) { try { await printShiftReport(sh, t, cnt); } catch (e) { toast('تعذر الطباعة: ' + e.message, 'err'); } }
   };
 };
 ACT['exp-new'] = async () => {
@@ -52,3 +53,13 @@ ACT['exp-new'] = async () => {
     await audit('مصروف', `${$('#ec', m).value} ${money(a)}`); m.close(); go('cash');
   };
 };
+
+async function printShiftReport(sh, t, counted) {
+  const S = App.settings, row = (a, b) => `<div style="display:flex;justify-content:space-between"><span>${a}</span><span>${b}</span></div>`;
+  $('#receipt').innerHTML = `<h3>${esc(S.pharmacy_name)}</h3><div class="c"><b>تقرير إقفال وردية #${sh.id}</b></div><hr>
+   <div>الكاشير: ${esc(App.user.name)}</div><div>الفتح: ${ftime(sh.opened_at)}</div><div>الإقفال: ${ftime(nowISO())}</div><hr>
+   ${row('عدد الفواتير', t.n)}${row('إجمالي المبيعات', money(t.total))}${row('كاش', money(t.cash))}${row('فيزا', money(t.card))}${row('آجل', money(t.credit))}<hr>
+   ${row('رصيد الافتتاح', money(sh.opening_cash))}${row('تحصيلات كاش', money(t.custPay))}${row('مرتجعات كاش', money(t.returnsCash))}${row('سداد موردين', money(t.supPay))}${row('مصروفات', money(t.expenses))}<hr>
+   ${row('<b>المتوقع في الدرج</b>', '<b>' + money(t.expected) + '</b>')}${row('الفعلي (جرد)', money(counted))}${row('<b>الفرق</b>', '<b>' + money(counted - t.expected) + '</b>')}<hr><div class="c">توقيع: ____________</div>`;
+  await doPrint();
+}

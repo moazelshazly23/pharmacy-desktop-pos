@@ -49,7 +49,7 @@ function autoBackup() {
   try {
     const dir = path.join(app.getPath('userData'), 'backups');
     fs.mkdirSync(dir, { recursive: true });
-    const d = new Date().toISOString().slice(0, 10);
+    const nd = new Date(), d = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}-${String(nd.getDate()).padStart(2, '0')}`;
     const f = path.join(dir, `pharmacy-${d}.db`);
     if (fs.existsSync(dbFile)) fs.copyFileSync(dbFile, f); // refreshed on start, hourly and on exit, so the day's backup is current
     const prune = (p) => { const files = fs.readdirSync(p).filter((x) => /^pharmacy-\d{4}-\d{2}-\d{2}\.db$/.test(x)).sort(); while (files.length > 14) fs.unlinkSync(path.join(p, files.shift())); };
@@ -147,7 +147,7 @@ ipcMain.handle('app:chooseBackupDir', async (_e, clear) => {
   setCfg({ backupDir: r.filePaths[0] }); autoBackup(); return { ok: true, dir: r.filePaths[0] };
 });
 ipcMain.handle('app:openBackups', () => shell.openPath(path.join(app.getPath('userData'), 'backups')));
-ipcMain.handle('app:print', async () => { win.webContents.print({ silent: false, printBackground: true }); return true; });
+ipcMain.handle('app:print', (_e, silent) => new Promise((res) => { win.webContents.print({ silent: !!silent, printBackground: true }, (ok, why) => res({ ok, why })); }));
 
 function createWindow() {
   win = new BrowserWindow({

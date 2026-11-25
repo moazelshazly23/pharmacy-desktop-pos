@@ -62,3 +62,14 @@ CREATE TABLE IF NOT EXISTS stock_adjustments (
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, user_id INTEGER, user_name TEXT, action TEXT, detail TEXT);
+
+CREATE INDEX IF NOT EXISTS ix_sales_shift ON sales(shift_id);
+CREATE INDEX IF NOT EXISTS ix_sales_customer ON sales(customer_id);
+CREATE INDEX IF NOT EXISTS ix_returns_shift ON sale_returns(shift_id);
+CREATE INDEX IF NOT EXISTS ix_returns_date ON sale_returns(date);
+CREATE INDEX IF NOT EXISTS ix_payments_party ON payments(party_type, party_id);
+CREATE INDEX IF NOT EXISTS ix_payments_shift ON payments(shift_id);
+CREATE INDEX IF NOT EXISTS ix_expenses_shift ON expenses(shift_id);
+CREATE INDEX IF NOT EXISTS ix_expenses_date ON expenses(date);
+CREATE INDEX IF NOT EXISTS ix_purchase_items_p ON purchase_items(purchase_id);
+CREATE INDEX IF NOT EXISTS ix_audit_id ON audit_log(id);

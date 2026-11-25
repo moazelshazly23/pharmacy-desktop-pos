@@ -8,5 +8,5 @@ contextBridge.exposeInMainWorld('api', {
   info: () => ipcRenderer.invoke('app:info'),
   chooseBackupDir: (clear) => ipcRenderer.invoke('app:chooseBackupDir', !!clear),
   openBackups: () => ipcRenderer.invoke('app:openBackups'),
-  print: () => ipcRenderer.invoke('app:print'),
+  print: (silent) => ipcRenderer.invoke('app:print', !!silent),
 });

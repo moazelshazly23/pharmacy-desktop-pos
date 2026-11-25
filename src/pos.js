@@ -11,7 +11,7 @@ const cartTotal = () => r2(cartSub() - cartDisc());
 
 Views.posLeave = () => {};
 Views.pos = async (el) => {
-  App.held = JSON.parse(localStorage.getItem('held') || '[]');
+  try { App.held = JSON.parse(localStorage.getItem('held') || '[]'); if (!Array.isArray(App.held)) App.held = []; } catch (e) { App.held = []; }
   el.style.padding = '14px 18px';
   el.innerHTML = `<div class="pos"><div class="pos-left">
     <div class="searchbar"><span class="si">🔍</span><input id="q" placeholder="امسح الباركود أو اكتب اسم الدواء / المادة الفعالة... (F2)" autocomplete="off" autofocus><div class="results" id="res" hidden></div></div>
@@ -167,7 +167,7 @@ ACT['pos-customer'] = async () => {
   const load = async () => {
     const t = `%${$('#cq', m).value.trim()}%`;
     const rows = await Q('SELECT * FROM customers WHERE name LIKE ? OR phone LIKE ? ORDER BY name LIMIT 30', [t, t]);
-    $('#cl', m).innerHTML = rows.map((c) => `<div class="res" data-id="${c.id}"><div class="grow b">${esc(c.name)}<div class="small mute">${esc(c.phone || '')}</div></div>${c.balance ? `<span class="pill red">عليه ${money(c.balance)}</span>` : ''}</div>`).join('') || '<div class="empty">مفيش عملاء</div>';
+    $('#cl', m).innerHTML = rows.map((c) => `<div class="res" data-id="${c.id}"><div class="grow b">${esc(c.name)}<div class="small mute">${esc(c.phone || '')}</div></div>${c.balance > 0.001 ? `<span class="pill red">عليه ${money(c.balance)}</span>` : c.balance < -0.001 ? `<span class="pill">له ${money(-c.balance)}</span>` : ''}</div>`).join('') || '<div class="empty">مفيش عملاء</div>';
     $$('.res', m).forEach((n) => (n.onclick = async () => { POS.customer = await Q1('SELECT * FROM customers WHERE id=?', [n.dataset.id]); m.close(); renderTotals(); }));
   };
   $('#cq', m).oninput = debounce(load, 120); load();
@@ -258,7 +258,7 @@ async function saveSale({ cash, card, credit, delivery }) {
 }
 
 // ---------- receipt ----------
-async function printReceipt(saleId) {
+async function printReceipt(saleId, opts = {}) {
   const s = await Q1('SELECT s.*, u.name uname, c.name cname FROM sales s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=?', [saleId]);
   const items = await Q('SELECT si.*, d.arabic, d.name, d.strips FROM sale_items si JOIN drugs d ON d.id=si.drug_id WHERE si.sale_id=?', [saleId]);
   const merged = {};
@@ -271,6 +271,8 @@ async function printReceipt(saleId) {
    ${s.discount ? `<div style="display:flex;justify-content:space-between"><span>الخصم</span><span>${money(s.discount)}</span></div>` : ''}
    <div style="display:flex;justify-content:space-between;font-size:15px"><b>الصافي</b><b>${money(s.total)} ${cur()}</b></div>
    ${s.cash ? `<div>كاش: ${money(s.cash)}</div>` : ''}${s.card ? `<div>فيزا: ${money(s.card)}</div>` : ''}${s.credit ? `<div>آجل: ${money(s.credit)}</div>` : ''}<hr><div class="c">${esc(S.receipt_footer || '')}</div>`;
-  await api.print();
+  if (App.settings.auto_print === '0' && !opts.force) return;
+  await doPrint();
 }
-ACT['reprint'] = (el) => printReceipt(+el.dataset.id);
+async function doPrint() { const r = await api.print(App.settings.silent_print === '1'); if (r && r.ok === false && r.why && !/cancel/i.test(r.why)) throw new Error(r.why); }
+ACT['reprint'] = (el) => printReceipt(+el.dataset.id, { force: true }).catch((e) => toast('تعذر الطباعة: ' + e.message, 'err'));
