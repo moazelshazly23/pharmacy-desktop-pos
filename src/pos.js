@@ -20,7 +20,7 @@ Views.pos = async (el) => {
     <div class="row"><button class="btn sec" data-act="pos-hold">⏸ تعليق الفاتورة (F6)</button><button class="btn sec" data-act="pos-held">📂 الفواتير المعلقة <span id="hc" class="pill">0</span></button><button class="btn sec" data-act="pos-clear">🗑 فاتورة جديدة</button><span class="grow"></span><span class="mute small">Enter: إضافة | F9: دفع | Del: حذف آخر صنف</span></div>
   </div><div class="pos-right">
     <div class="card totals" id="totals"></div>
-    <div class="card grow" style="overflow:hidden;display:flex;flex-direction:column"><div class="row mb"><b>🔁 البدائل (نفس المادة الفعالة)</b></div><div class="alts" id="alts"><div class="mute small">اختار صنف من الفاتورة أو من البحث عشان تظهر بدائله مع السعر والمتاح.</div></div></div>
+    <div class="card grow" style="overflow:hidden;display:flex;flex-direction:column"><div class="row mb"><b>🔁 البدائل (نفس المادة الفعالة)</b><span class="mute small"> راجع التركيز والشكل الدوائي قبل الصرف</span></div><div class="alts" id="alts"><div class="mute small">اختار صنف من الفاتورة أو من البحث عشان تظهر بدائله مع السعر والمتاح.</div></div></div>
   </div></div>`;
   const q = $('#q');
   const doSearch = debounce(async () => {
@@ -37,7 +37,10 @@ Views.pos = async (el) => {
       e.preventDefault();
       const v = q.value.trim(); if (!v) return;
       if (/^\d{6,}$/.test(v)) { // barcode scan
-        const r = await Q('SELECT * FROM drugs WHERE barcode=? LIMIT 1', [v]);
+        const r = await searchDrugs(v, { limit: 30 }).then((x) => x.filter((d) => d.barcode === v));
+        if (r.length > 1) { // the catalog has barcodes shared by different products: never guess, let the cashier pick
+          POS.results = r; POS.sel = 0; showRes(); toast('الباركود ده مسجل لأكتر من صنف. اختار الصنف الصح من القائمة', 'err'); return;
+        }
         if (r.length) { await addToCart(r[0]); q.value = ''; hideRes(); }
         else await unknownBarcode(v);
         return;
@@ -84,6 +87,7 @@ async function unknownBarcode(code) {
 async function addToCart(d, unit = 'pack') {
   if (!App.shift && !App.warnedShift) { App.warnedShift = true; toast('تنبيه: مفيش وردية مفتوحة. افتح وردية من "الوردية والمصروفات" عشان الجرد اليومي يتحسب', ''); }
   const full = await getDrug(d.id);
+  if (!(full.price > 0)) toast('تنبيه: الصنف ده سعره صفر. حدّث السعر من شاشة الأصناف قبل البيع', 'err');
   const ex = POS.cart.find((l) => l.id === full.id && l.unit === unit);
   if (ex) ex.n += 1;
   else POS.cart.push({ id: full.id, name: full.arabic || full.name, en: full.name, active: full.active, price: full.price, strips: full.strips || 1, unit, n: 1, disc: 0, stock: full.stock, kind: full.kind });
@@ -223,6 +227,8 @@ async function saveSale({ cash, card, credit, delivery }) {
     const allocs = [];
     for (const b of batches) { if (need <= 0.0000001) break; const avail = b.qty - (consumed[b.id] || 0); if (avail <= 0) continue; const take = Math.min(avail, need); consumed[b.id] = (consumed[b.id] || 0) + take; allocs.push({ batch: b.id, q: take, cost: b.cost }); need -= take; if (take > 0) ops.push({ sql: 'UPDATE batches SET qty=qty-? WHERE id=?', params: [take, b.id] }); }
     if (need > 0.0000001) {
+      const expd = await Q1('SELECT COALESCE(SUM(qty),0) q FROM batches WHERE drug_id=? AND qty>0 AND expiry IS NOT NULL AND expiry<?', [l.id, t]);
+      if (expd.q > 0) throw new Error(`الصنف ${l.name}: الرصيد المتاح منتهي الصلاحية (${qtyf(expd.q)}) ومينفعش يتباع. اسحبه من الرف وصحّح الرصيد من الجرد`);
       if (!allowNeg) throw new Error(`الرصيد غير كافٍ للصنف: ${l.name} (المتاح ${qtyf(l.stock)})`);
       let nb = await Q1("SELECT * FROM batches WHERE drug_id=? AND batch_no='' AND expiry IS NULL LIMIT 1", [l.id]);
       const dr = await getDrug(l.id);

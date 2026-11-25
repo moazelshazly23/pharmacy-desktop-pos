@@ -4,6 +4,9 @@ const fs = require('fs');
 const initSqlJs = require('sql.js');
 
 if (process.env.PH_USERDATA) app.setPath('userData', process.env.PH_USERDATA);
+// Only one instance: two copies open at once would overwrite each other's data.
+if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
+app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 let SQL, db, win, dbFile, saveTimer = null, dirty = false;
 
 function seedPath() {
@@ -15,14 +18,19 @@ function flush() {
   const buf = Buffer.from(db.export());
   const tmp = dbFile + '.tmp';
   fs.writeFileSync(tmp, buf);
-  fs.renameSync(tmp, dbFile);
+  try { fs.renameSync(tmp, dbFile); }
+  catch (e) { fs.copyFileSync(tmp, dbFile); try { fs.unlinkSync(tmp); } catch (_) {} } // antivirus can lock the rename on Windows
   dirty = false;
+}
+// Never throws: after COMMIT the data is already in memory, so a failed disk write must not look like a failed sale (that causes duplicate invoices). Retries until it works.
+function safeFlush() {
+  try { flush(); } catch (e) { console.error('save failed, retrying', e); clearTimeout(saveTimer); saveTimer = setTimeout(safeFlush, 3000); }
 }
 function scheduleSave(now) {
   dirty = true;
-  if (now) { clearTimeout(saveTimer); flush(); return; }
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(flush, 700);
+  if (now) { safeFlush(); return; }
+  saveTimer = setTimeout(safeFlush, 700);
 }
 function autoBackup() {
   try {
@@ -30,7 +38,7 @@ function autoBackup() {
     fs.mkdirSync(dir, { recursive: true });
     const d = new Date().toISOString().slice(0, 10);
     const f = path.join(dir, `pharmacy-${d}.db`);
-    if (!fs.existsSync(f) && fs.existsSync(dbFile)) fs.copyFileSync(dbFile, f);
+    if (fs.existsSync(dbFile)) fs.copyFileSync(dbFile, f); // refreshed on start, hourly and on exit, so the day's backup is current
     const files = fs.readdirSync(dir).filter((x) => x.endsWith('.db')).sort();
     while (files.length > 14) fs.unlinkSync(path.join(dir, files.shift()));
   } catch (e) { console.error('backup failed', e); }
@@ -53,7 +61,15 @@ async function openDb() {
   db = new SQL.Database(fs.readFileSync(dbFile));
   db.run('PRAGMA foreign_keys = OFF');
   db.run(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8')); // creates missing tables only
+  migrate();
   autoBackup();
+  setInterval(() => { try { flush(); autoBackup(); } catch (e) {} }, 60 * 60 * 1000);
+}
+// Schema upgrades for future versions: add columns here (CREATE IF NOT EXISTS does not add columns).
+function migrate() {
+  const has = (t, c) => all(`PRAGMA table_info(${t})`).some((r) => r.name === c);
+  const add = (t, c, def) => { if (!has(t, c)) db.run(`ALTER TABLE ${t} ADD COLUMN ${c} ${def}`); };
+  scheduleSave(true);
 }
 
 ipcMain.handle('db:all', (_e, sql, params) => all(sql, params));
@@ -115,5 +131,5 @@ app.whenReady().then(async () => {
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
-app.on('before-quit', () => { clearTimeout(saveTimer); try { flush(); } catch (e) {} });
+app.on('before-quit', () => { clearTimeout(saveTimer); try { flush(); autoBackup(); } catch (e) {} });
 app.on('window-all-closed', () => { try { flush(); } catch (e) {} app.quit(); });

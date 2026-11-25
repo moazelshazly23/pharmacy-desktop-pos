@@ -32,7 +32,7 @@ const RULES = [
   { a: ['allopurinol'], b: ['azathioprine', 'mercaptopurine'], lvl: 'danger', msg: 'يرفع سمّية الدواء ويضعف النخاع العظمي' },
   { a: ['isotretinoin'], b: ['tetracycline', 'doxycycline', 'minocycline'], lvl: 'warn', msg: 'خطر ارتفاع الضغط داخل الجمجمة' },
 ];
-const has = (active, list) => list.some((x) => active.includes(x));
+const has = (active, list) => list.some((x) => new RegExp('(^|[^a-z])' + x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(active));
 // items: [{id, name, active}] => [{lvl,msg,names}]
 function checkInteractions(items) {
   const out = [], seen = new Set();
