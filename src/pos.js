@@ -200,7 +200,7 @@ ACT['pos-pay'] = async () => {
     let cash = 0, card = 0, credit = 0;
     if (mode === 'cash') { cash = total; if (num($('#tend', m).value) < total - 0.001) { $('#pe', m).textContent = 'المبلغ المدفوع أقل من المطلوب (استخدم آجل أو مختلط)'; return; } }
     else if (mode === 'card') card = total;
-    else if (mode === 'credit') { cash = Math.min(total, num($('#cash2', m).value)); credit = r2(total - cash); }
+    else if (mode === 'credit') { const adv = num($('#cash2', m).value); if (adv < 0) { $('#pe', m).textContent = 'مينفعش مبلغ بالسالب'; return; } cash = Math.min(total, adv); credit = r2(total - cash); }
     else { cash = num($('#mc', m).value); card = num($('#mv', m).value); credit = num($('#mr', m).value); if (cash < 0 || card < 0 || credit < 0) { $('#pe', m).textContent = 'مينفعش مبلغ بالسالب'; return; } if (Math.abs(cash + card + credit - total) > 0.01) { $('#pe', m).textContent = `مجموع الدفع (${money(cash + card + credit)}) لا يساوي المطلوب`; return; } }
     if (credit > 0 && !POS.customer) { $('#pe', m).textContent = 'اختار عميل للبيع الآجل'; return; }
     $('#pok', m).disabled = true;

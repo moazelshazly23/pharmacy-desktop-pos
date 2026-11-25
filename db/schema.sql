@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS sale_returns (
 );
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, party_type TEXT NOT NULL, party_id INTEGER NOT NULL,
-  amount REAL NOT NULL, user_id INTEGER, shift_id INTEGER, note TEXT
+  amount REAL NOT NULL, user_id INTEGER, shift_id INTEGER, note TEXT, method TEXT NOT NULL DEFAULT 'drawer'
 );
 CREATE TABLE IF NOT EXISTS expenses (
   id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, category TEXT, amount REAL NOT NULL, note TEXT, user_id INTEGER, shift_id INTEGER

@@ -70,6 +70,7 @@ function migrate() {
   const has = (t, c) => all(`PRAGMA table_info(${t})`).some((r) => r.name === c);
   const add = (t, c, def) => { if (!has(t, c)) db.run(`ALTER TABLE ${t} ADD COLUMN ${c} ${def}`); };
   add('users', 'failed_count', 'INTEGER NOT NULL DEFAULT 0'); add('users', 'locked_until', 'INTEGER NOT NULL DEFAULT 0');
+  add('payments', 'method', "TEXT NOT NULL DEFAULT 'drawer'"); // drawer = in/out of the cash drawer, external = card/transfer: excluded from the shift count
   scheduleSave(true);
 }
 

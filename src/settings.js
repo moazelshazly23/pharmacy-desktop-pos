@@ -39,6 +39,8 @@ async function userForm(u) {
     try {
       if (u) {
         if (u.id === App.user.id && (!$('#u_a', m).checked || $('#u_r', m).value !== 'admin')) return ($('#u_e', m).textContent = 'مينفعش توقف أو تنزّل صلاحية حسابك الحالي');
+        const admins = await Q1("SELECT COUNT(*) c FROM users WHERE role='admin' AND active=1");
+        if (u.role === 'admin' && u.active && admins.c <= 1 && ($('#u_r', m).value !== 'admin' || !$('#u_a', m).checked)) return ($('#u_e', m).textContent = 'مينفعش تشيل صلاحية أو توقف آخر مدير نشط في النظام');
         await X('UPDATE users SET name=?, role=?, active=? WHERE id=?', [n, $('#u_r', m).value, $('#u_a', m).checked ? 1 : 0, u.id]);
         if (p) await X('UPDATE users SET pin_hash=?, must_change=0 WHERE id=?', [await hashPin(p), u.id]);
         if ($('#u_ul', m)?.checked) await X('UPDATE users SET failed_count=0, locked_until=0 WHERE id=?', [u.id]);

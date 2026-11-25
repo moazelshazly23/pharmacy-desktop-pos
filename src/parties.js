@@ -30,11 +30,13 @@ ACT['party-new'] = () => partyForm(PartyState.tab);
 ACT['party-edit'] = async (el) => partyForm(PartyState.tab, await Q1(`SELECT * FROM ${PartyState.tab} WHERE id=?`, [el.dataset.id]));
 ACT['party-pay'] = async (el) => {
   const tb = PartyState.tab, isC = tb === 'customers', p = await Q1(`SELECT * FROM ${tb} WHERE id=?`, [el.dataset.id]);
-  const m = modal(`${isC ? 'تحصيل من' : 'سداد إلى'} ${esc(p.name)}`, `<p>الرصيد الحالي: <b>${money(p.balance)}</b></p><div class="field"><label>المبلغ</label><input id="py" value="${Math.max(0, p.balance)}" inputmode="decimal"></div><div class="field mt"><label>ملاحظة</label><input id="pn"></div>`, { footer: '<button class="btn" id="pok">تأكيد</button>' });
+  const m = modal(`${isC ? 'تحصيل من' : 'سداد إلى'} ${esc(p.name)}`, `<p>الرصيد الحالي: <b>${money(p.balance)}</b></p><div class="field"><label>المبلغ</label><input id="py" value="${Math.max(0, p.balance)}" inputmode="decimal"></div><div class="field mt"><label>ملاحظة</label><input id="pn"></div><label class="row small mt"><input type="checkbox" id="pdr" checked> ${isC ? 'المبلغ دخل درج الكاش (يتحسب في جرد الوردية)' : 'المبلغ طلع من درج الكاش (يتخصم من جرد الوردية)'}</label>`, { footer: '<button class="btn" id="pok">تأكيد</button>' });
   $('#py', m).select();
   $('#pok', m).onclick = async () => {
     const a = num($('#py', m).value); if (a <= 0) return toast('اكتب مبلغ صحيح', 'err');
-    await api.tx([{ sql: 'INSERT INTO payments(date,party_type,party_id,amount,user_id,shift_id,note) VALUES(?,?,?,?,?,?,?)', params: [nowISO(), isC ? 'customer' : 'supplier', p.id, a, App.user.id, App.shift?.id || null, $('#pn', m).value] }, { sql: `UPDATE ${tb} SET balance=balance-? WHERE id=?`, params: [a, p.id] }]);
+    const drawer = $('#pdr', m).checked;
+    await api.tx([{ sql: 'INSERT INTO payments(date,party_type,party_id,amount,user_id,shift_id,note,method) VALUES(?,?,?,?,?,?,?,?)', params: [nowISO(), isC ? 'customer' : 'supplier', p.id, a, App.user.id, App.shift?.id || null, $('#pn', m).value, drawer ? 'drawer' : 'external'] }, { sql: `UPDATE ${tb} SET balance=balance-? WHERE id=?`, params: [a, p.id] }]);
+    await audit(isC ? 'تحصيل من عميل' : 'سداد مورد', `${p.name}: ${money(a)}${drawer ? '' : ' (خارج الدرج)'}`);
     m.close(); toast('تم تسجيل العملية', 'ok'); go('parties');
   };
 };

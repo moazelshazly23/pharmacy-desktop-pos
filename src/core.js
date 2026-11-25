@@ -164,6 +164,7 @@ function stockPill(s, min = 0) {
 // ---------- auth / shift ----------
 async function currentShift() {
   App.shift = (await Q1('SELECT * FROM shifts WHERE closed_at IS NULL AND user_id=? ORDER BY id DESC LIMIT 1', [App.user.id])) || null;
+  if (App.shift) App.warnedShift = false; // allow the no-shift warning again if the shift gets closed
   return App.shift;
 }
 function renderLogin() {
@@ -267,7 +268,9 @@ function startIdleLock() {
     lockScreen();
   }, 15000);
 }
+let lockFails = 0;
 function lockScreen() {
+  lockFails = 0;
   const ov = document.createElement('div'); ov.className = 'ov lockov'; ov.style.zIndex = 9999; ov.style.background = 'var(--bg, #f4f6f8)';
   ov.innerHTML = `<form class="login" style="width:100%"><div class="box"><div class="logo">🔒</div><h2>الشاشة مقفولة</h2><p>${esc(App.user.name)} - اكتب الرقم السري للمتابعة (السلة والفاتورة محفوظة)</p><div class="field"><input id="lkp" type="password" inputmode="numeric" autofocus></div><div class="err" id="lke"></div><button class="btn lg" style="width:100%">فتح</button><button type="button" class="btn sec" style="width:100%;margin-top:8px" id="lko">تسجيل خروج</button></div></form>`;
   document.body.appendChild(ov);
@@ -276,6 +279,9 @@ function lockScreen() {
   ov.querySelector('form').onsubmit = async (e) => {
     e.preventDefault();
     const u = await Q1('SELECT pin_hash FROM users WHERE id=?', [App.user.id]);
-    if (await verifyPin($('#lkp', ov).value, u.pin_hash)) { ov.remove(); lastAct = Date.now(); } else { $('#lke', ov).textContent = 'الرقم السري غلط'; $('#lkp', ov).select(); }
+    if (await verifyPin($('#lkp', ov).value, u.pin_hash)) { ov.remove(); lastAct = Date.now(); lockFails = 0; return; }
+    lockFails++;
+    if (lockFails >= 5) { ov.remove(); logout(); return; } // no unlimited guessing: after 5 wrong tries the full login (with lockout) applies
+    $('#lke', ov).textContent = `الرقم السري غلط (${lockFails} من 5 وبعدها خروج)`; $('#lkp', ov).select();
   };
 }

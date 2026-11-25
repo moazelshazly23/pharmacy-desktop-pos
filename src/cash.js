@@ -3,8 +3,8 @@ async function shiftSummary(sh) {
   const id = sh.id;
   const s = await Q1('SELECT COALESCE(SUM(total),0) total, COALESCE(SUM(cash),0) cash, COALESCE(SUM(card),0) card, COALESCE(SUM(credit),0) credit, COUNT(*) n FROM sales WHERE shift_id=?', [id]);
   const rc = await Q1("SELECT COALESCE(SUM(total),0) t FROM sale_returns WHERE shift_id=? AND refund='cash'", [id]);
-  const pc = await Q1("SELECT COALESCE(SUM(amount),0) t FROM payments WHERE shift_id=? AND party_type='customer'", [id]);
-  const ps = await Q1("SELECT COALESCE(SUM(amount),0) t FROM payments WHERE shift_id=? AND party_type='supplier'", [id]);
+  const pc = await Q1("SELECT COALESCE(SUM(amount),0) t FROM payments WHERE shift_id=? AND party_type='customer' AND method='drawer'", [id]);
+  const ps = await Q1("SELECT COALESCE(SUM(amount),0) t FROM payments WHERE shift_id=? AND party_type='supplier' AND method='drawer'", [id]);
   const ex = await Q1('SELECT COALESCE(SUM(amount),0) t FROM expenses WHERE shift_id=?', [id]);
   const expected = r2(sh.opening_cash + s.cash + pc.t - rc.t - ps.t - ex.t);
   return { ...s, returnsCash: rc.t, custPay: pc.t, supPay: ps.t, expenses: ex.t, expected };

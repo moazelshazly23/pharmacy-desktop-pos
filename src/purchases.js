@@ -36,7 +36,7 @@ ACT['pur-new'] = async () => {
   $('#p_ok', m).onclick = async () => {
     if (!PUR.lines.length) return ($('#p_e', m).textContent = 'أضف صنف واحد على الأقل');
     for (const l of PUR.lines) { if (l.qty <= 0) return ($('#p_e', m).textContent = 'الكمية لازم تكون أكبر من صفر: ' + l.name); if (l.exp && !monthToDate(l.exp)) return ($('#p_e', m).textContent = 'صيغة الصلاحية غلط في: ' + l.name); }
-    const total = r2(PUR.lines.reduce((s, l) => s + l.qty * l.cost, 0)), paid = Math.min(total, num($('#p_paid', m).value)), sid = $('#p_s', m).value || null;
+    const total = r2(PUR.lines.reduce((s, l) => s + l.qty * l.cost, 0)), paid = Math.max(0, Math.min(total, num($('#p_paid', m).value))), sid = $('#p_s', m).value || null;
     const ops = [{ sql: 'INSERT INTO purchases(supplier_id,date,invoice_no,total,paid,user_id) VALUES(?,?,?,?,?,?)', params: [sid, $('#p_d', m).value || today(), $('#p_n', m).value.trim(), total, paid, App.user.id] }];
     for (const l of PUR.lines) {
       const ex = monthToDate(l.exp);

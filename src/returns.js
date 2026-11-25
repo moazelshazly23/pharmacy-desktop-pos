@@ -16,6 +16,7 @@ async function openReturn(saleId) {
     `<div class="row mt"><div class="field"><label>طريقة رد المبلغ</label><select id="r_m"><option value="cash">كاش من الدرج</option><option value="card">رد على الفيزا (مش من الدرج)</option>${s.customer_id ? '<option value="balance">خصم من حساب العميل</option>' : ''}</select></div><span class="grow"></span><div><span class="mute">قيمة المرتجع</span><div id="r_t" style="font-size:26px;font-weight:800;color:var(--danger)">0.00</div></div></div>`,
     { wide: true, footer: '<button class="btn danger" id="r_ok">تأكيد المرتجع</button>' });
   if (s.credit > 0 && s.customer_id) $('#r_m', m).value = 'balance'; // credit sale: default refund goes back to the customer's account
+  else if (s.card > 0 && s.cash <= 0.001) $('#r_m', m).value = 'card'; // paid fully by card: default refund back to the card, not out of the drawer
   const factor = s.subtotal > 0 ? s.total / s.subtotal : 1; // invoice-level discount shares into each item's refund
   const calc = () => { let t = 0; $$('[data-rq]', m).forEach((i) => { const it = items.find((x) => x.id == i.dataset.rq); const q = Math.min(num(i.value), it.qty - it.returned_qty); t += (it.total / it.qty) * q * factor; }); $('#r_t', m).textContent = money(t); return t; };
   m.addEventListener('input', (e) => e.target.dataset.rq && calc());
