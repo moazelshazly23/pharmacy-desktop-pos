@@ -67,7 +67,7 @@ async function openItem(id, afterClose) {
       if (!v('#f_ar') && !v('#f_en')) return toast('اكتب اسم الصنف', 'err');
       if (num(v('#f_pr')) < 0 || num(v('#f_mq')) < 0) return toast('السعر وحد الطلب مينفعش يكونوا بالسالب', 'err');
       const bc = v('#f_bc');
-      if (bc) { const ex = await Q1('SELECT id,arabic FROM drugs WHERE barcode=? AND id<>?', [bc, d.id]); if (ex) return toast('الباركود ده مسجل على صنف تاني: ' + (ex.arabic || ''), 'err'); }
+      if (bc && bc !== String(d.barcode || '')) { const ex = await Q1('SELECT id,arabic FROM drugs WHERE barcode=? AND id<>?', [bc, d.id]); if (ex) return toast('الباركود ده مسجل على صنف تاني: ' + (ex.arabic || ''), 'err'); }
       if (!id) { const dup = await Q1("SELECT arabic, name FROM drugs WHERE (arabic<>'' AND lower(arabic)=lower(?)) OR (name<>'' AND lower(name)=lower(?)) LIMIT 1", [v('#f_ar'), v('#f_en')]); if (dup && !(await confirmBox(`فيه صنف بنفس الاسم مسجل: <b>${esc(dup.arabic || dup.name)}</b>. تضيف صنف جديد برضه؟`, 'إضافة'))) return; }
       const search = normAr([v('#f_ar'), v('#f_en'), v('#f_ac'), bc, v('#f_co')].join(' '));
       const vals = [v('#f_en'), v('#f_ar'), v('#f_ac'), v('#f_co'), num(v('#f_pr')), bc || null, Math.max(1, Math.round(num(v('#f_st')) || 1)), num(v('#f_mq')), $('#f_kd', m).value, search];
@@ -99,6 +99,7 @@ async function batchForm(drugId, b, done) {
     { footer: `<button class="btn" id="b_ok">حفظ</button>${b ? '<button class="btn danger" id="b_del">حذف التشغيلة</button>' : ''}` });
   $('#b_ok', m).onclick = async () => {
     const ex = monthToDate($('#b_ex', m).value); if ($('#b_ex', m).value.trim() && !ex) return ($('#b_e', m).textContent = 'صيغة الصلاحية غلط، اكتبها مثل 2027-03');
+    if (b && $('#b_q', m).value.trim() === '') return ($('#b_e', m).textContent = 'اكتب الكمية الفعلية (اكتب 0 لو الرصيد صفر)');
     const q = num($('#b_q', m).value), c = num($('#b_c', m).value);
     if (q < 0 || c < 0) return ($('#b_e', m).textContent = 'الكمية والتكلفة مينفعش يكونوا بالسالب');
     if ($('#b_ok', m).disabled) return; $('#b_ok', m).disabled = true;

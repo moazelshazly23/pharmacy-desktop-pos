@@ -163,9 +163,9 @@ ACT['pos-hold'] = () => {
 ACT['pos-held'] = () => {
   if (!App.held.length) return toast('مفيش فواتير معلقة');
   const m = modal('الفواتير المعلقة', App.held.map((h, i) => `<div class="res"><div class="grow"><b>${h.cart.length} صنف</b> <span class="mute small">${ftime(h.t)}${h.customer ? ' · ' + esc(h.customer.name) : ''}</span></div><button class="btn sm" data-i="${i}" data-a="open">فتح</button><button class="btn danger sm" data-i="${i}" data-a="del">حذف</button></div>`).join(''));
-  m.onclick = (e) => {
+  m.onclick = async (e) => {
     const b = e.target.closest('button[data-i]'); if (!b) return; const i = +b.dataset.i;
-    if (b.dataset.a === 'open') { const h = App.held.splice(i, 1)[0]; if (POS.cart.length) App.held.push({ t: nowISO(), cart: POS.cart, customer: POS.customer, discType: POS.discType, discVal: POS.discVal }); /* current invoice is parked, not lost */ Object.assign(POS, { cart: h.cart, customer: h.customer, discType: h.discType, discVal: h.discVal }); }
+    if (b.dataset.a === 'open') { const h = App.held.splice(i, 1)[0]; const fresh = []; for (const l of h.cart) { const fd = await getDrug(l.id); if (!fd) continue; if (Math.abs(num(fd.price) - num(l.price)) > 0.001) toast('سعر "' + l.name + '" اتغير من ' + money(l.price) + ' إلى ' + money(fd.price) + ' من وقت التعليق. راجع السعر في الفاتورة', ''); fresh.push({ ...l, strips: fd.strips || 1, stock: fd.stock }); } h.cart = fresh; /* stock may have changed since parking; price is kept but flagged */ if (POS.cart.length) App.held.push({ t: nowISO(), cart: POS.cart, customer: POS.customer, discType: POS.discType, discVal: POS.discVal }); /* current invoice is parked, not lost */ Object.assign(POS, { cart: h.cart, customer: h.customer, discType: h.discType, discVal: h.discVal }); }
     else App.held.splice(i, 1);
     localStorage.setItem('held', JSON.stringify(App.held)); m.close(); renderCart();
   };
@@ -246,7 +246,7 @@ async function saveSale({ cash, card, credit, delivery }) {
     if (need > 0.0000001) {
       const expd = await Q1('SELECT COALESCE(SUM(qty),0) q FROM batches WHERE drug_id=? AND qty>0 AND expiry IS NOT NULL AND expiry<?', [l.id, t]);
       if (expd.q > 0) throw new Error(`الصنف ${l.name}: الرصيد المتاح منتهي الصلاحية (${qtyf(expd.q)}) ومينفعش يتباع. اسحبه من الرف وصحّح الرصيد من الجرد`);
-      if (!allowNeg) throw new Error(`الرصيد غير كافٍ للصنف: ${l.name} (المتاح ${qtyf(l.stock)})`);
+      if (!allowNeg) throw new Error(`الرصيد غير كافٍ للصنف: ${l.name} (المتاح للبيع ${qtyf(batches.reduce((x, b) => x + b.qty, 0))})`);
       let nb = await Q1("SELECT * FROM batches WHERE drug_id=? AND batch_no='' AND expiry IS NULL LIMIT 1", [l.id]);
       const dr = await getDrug(l.id);
       if (nb) { ops.push({ sql: 'UPDATE batches SET qty=qty-? WHERE id=?', params: [need, nb.id] }); allocs.push({ batch: nb.id, q: need, cost: nb.cost || dr.cost || 0 }); }
