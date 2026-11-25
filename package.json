@@ -1,0 +1,34 @@
+{
+  "name": "pharmacy-system",
+  "version": "1.0.0",
+  "description": "نظام إدارة صيدلية: مبيعات بالباركود، مخزون بالتشغيلات وتواريخ الانتهاء، مشتريات، عملاء وموردين، تقارير، وقاعدة بيانات الأدوية المصرية",
+  "main": "main.js",
+  "author": "Moaz Elshazly",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build-db": "node scripts/build-db.js",
+    "dist": "npm run build-db && electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "sql.js": "^1.12.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.moazelshazly.pharmacy",
+    "productName": "Pharmacy System",
+    "files": ["main.js", "preload.js", "src/**/*", "db/**/*", "package.json"],
+    "extraResources": [{ "from": "data/pharmacy.seed.db", "to": "pharmacy.seed.db" }],
+    "directories": { "output": "dist" },
+    "win": { "target": "nsis" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "Pharmacy.System.Setup.${version}.${ext}"
+    }
+  }
+}
