@@ -22,11 +22,11 @@ jobs:
           node-version: 22
       - name: Unpack project payload (first run only)
         run: |
-          if ls payload-*.b64 >/dev/null 2>&1; then
-            cat payload-*.b64 | tr -d '\r\n ' | base64 -d > payload.tgz
+          if ls *payload*.b64 >/dev/null 2>&1; then
+            cat *payload*.b64 | tr -d '\r\n ' | base64 -d > payload.tgz
             tar xzf payload.tgz
-            git rm -q --cached payload-*.b64 || true
-            rm -f payload-*.b64 payload.tgz
+            git rm -q --cached *payload*.b64 || true
+            rm -f *payload*.b64 payload.tgz
             git config user.name "github-actions"
             git config user.email "actions@github.com"
             git add -A
